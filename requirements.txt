@@ -57,7 +57,7 @@ Keras-Preprocessing==1.1.2
 kiwisolver==1.4.7
 libclang==18.1.1
 lxml==6.0.2
-mani_skill==3.0.0b21
+mani_skill==3.0.0b22
 Markdown==3.7
 markdown-it-py==3.0.0
 MarkupSafe==2.1.5
@@ -117,7 +117,7 @@ pyparsing==3.1.4
 pyperclip==1.11.0
 PySocks==1.7.1
 python-dateutil==2.9.0.post0
-pytorch-kinematics==0.7.5
+pytorch-kinematics==0.7.6
 pytorch-seed==0.2.0
 pytz==2025.2
 PyWavelets==1.4.1
@@ -166,7 +166,7 @@ typeguard==4.4.4
 typing_extensions==4.15.0
 tyro==0.9.35
 urllib3==2.2.3
-wandb==0.20.1
+wandb==0.25.1
 wcwidth==0.2.13
 Werkzeug==3.0.6
 wrapt==1.12.1
