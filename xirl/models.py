@@ -437,7 +437,7 @@ class ResNet50(SelfSupervisedModel):
                 nn.init.constant_(m.weight, 1)
                 nn.init.constant_(m.bias, 0)
 
-    @torch.cuda.amp.autocast()
+    @torch.amp.autocast('cuda')
     def forward(self, x):
         batch_size, t, c, h, w = x.shape
         x_flat = x.view(-1, c, h, w).contiguous()
