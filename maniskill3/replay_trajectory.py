@@ -88,6 +88,10 @@ class Args:
     output_path: Optional[str] = None
     """The output path to save the replayed trajectory data and videos.
     By default it will save to the same directory"""
+    cam_width: Optional[int] = None
+    """Override width for all cameras (Default: 128)."""
+    cam_height: Optional[int] = None
+    """Override height for all cameras (Default: 128)."""
 
 
 @dataclass
@@ -531,6 +535,22 @@ def main(args: Args):
     ] = (
         args.render_mode
     )  # note this only affects the videos saved as RecordEpisode wrapper calls env.render
+
+    # modify camera resolution if specified by user
+    if args.cam_width is not None or args.cam_height is not None:
+        # override all observation camera resolutions and human render camera resolution.
+        sensor_configs = dict(env_kwargs.get("sensor_configs", {}))
+        human_render_camera_configs = dict(
+            env_kwargs.get("human_render_camera_configs", {})
+        )
+        if args.cam_width is not None:
+            sensor_configs["width"] = args.cam_width
+            human_render_camera_configs["width"] = args.cam_width
+        if args.cam_height is not None:
+            sensor_configs["height"] = args.cam_height
+            human_render_camera_configs["height"] = args.cam_height
+        env_kwargs["sensor_configs"] = sensor_configs
+        env_kwargs["human_render_camera_configs"] = human_render_camera_configs
 
     record_episode_kwargs = dict(
         save_on_reset=False,

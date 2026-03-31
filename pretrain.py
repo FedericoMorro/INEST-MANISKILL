@@ -64,7 +64,7 @@ def main(_):
     return
   
   if FLAGS.wandb:
-    wandb.init(project="StackPyramidPretrain", group="Pretrain", name="Xirl_Pretraining", mode="online")
+    wandb.init(project="StackPyramidPretrain", group="Pretrain", name=FLAGS.experiment_name, mode="online")
     wandb.config.update(FLAGS)
     wandb.run.log_code(".")
     wandb.config.update(config.to_dict(), allow_val_change=True)
@@ -165,12 +165,15 @@ def main(_):
           break
 
         time_per_iter = stopwatch.elapsed()
+        remaining_time = time_per_iter * (config.optim.train_max_iters - global_step)
         logging.info(
-            "Iter[{}/{}] (Epoch {}), {:.6f}s/iter, Loss: {:.3f}".format(
+            "Iter[{}/{}] (Epoch {}), {:.6f}s/iter (rem: {:.0f}m{:02.0f}s), Loss: {:.3f}".format(
                 global_step,
                 config.optim.train_max_iters,
                 epoch,
                 time_per_iter,
+                remaining_time // 60,
+                remaining_time % 60,
                 train_loss["train/total_loss"],
             ))
         if FLAGS.wandb:

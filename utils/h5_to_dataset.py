@@ -76,8 +76,8 @@ def _save_data_as_json(group, keys, key_type, path, traj_idx):
     for key in keys:
         data = _access_nested_group(group, key)
         data_list = np.array(data).tolist()  # convert to list for json serialization
-        key_type = f'{key_type}-' if key_type else ''
-        json_path = os.path.join(path, f'{traj_idx}_{key_type}{key.split("/")[-1]}.json')
+        key_prefix = f'{key_type}-' if key_type else ''
+        json_path = os.path.join(path, f'{traj_idx}_{key_prefix}{key.split("/")[-1]}.json')
         with open(json_path, 'w') as f:
             json.dump(data_list, f)
 

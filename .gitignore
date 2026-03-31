@@ -20,8 +20,10 @@ wandb/
 egocentric_dataset/
 
 
-# Ignore output files
+# Ignore output files and training checkpoints.
 out/*
+experiments/*
+prev_experiments/*
 
 
 # Created by https://www.toptal.com/developers/gitignore/api/python
