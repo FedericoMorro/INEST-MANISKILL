@@ -68,18 +68,18 @@ def compute_goal_embedding(model, train_loader, device):
   return goal_emb, dist_scale
 
 
-def compute_reward_signals(valid_loader, goal_emb, dist_scale):
+def compute_reward_signals(model, valid_loader, goal_emb, dist_scale, device):
   """Compute the negative distance to goal as reward signal for each trajectory"""
   rewards = []
   
   for class_name, class_loader in valid_loader.items():
     for batch in tqdm(iter(class_loader), leave=False, desc=f"Computing rewards for {class_name}"):
       out = model.infer(batch["frames"].to(device))
-      emb = out.numpy().embs  # shape: (seq_len, embedding_dim)
+      traj_emb = out.numpy().embs  # shape: (seq_len, embedding_dim)
       
       # compute euclidean distance from each frame to goal
-    dist = np.linalg.norm(goal_emb - traj_emb, axis=1)**2  # shape: (seq_len,)
-    rewards.append(- dist * dist_scale)
+      dist = np.linalg.norm(goal_emb - traj_emb, axis=1)**2  # shape: (seq_len,)
+      rewards.append(- dist * dist_scale)
   
   return rewards
 
@@ -101,6 +101,7 @@ def plot_results(rewards, output_dir, exp_name):
   os.makedirs(output_dir, exist_ok=True)
   
   # 4 sample trajectories in 2x2 grid
+  print(f"Plotting sample trajectories...")
   fig, axes = plt.subplots(2, 2, figsize=(14, 10))
   axes = axes.flatten()
   
@@ -115,14 +116,14 @@ def plot_results(rewards, output_dir, exp_name):
                     linewidth=2, label='Reward', marker='o', markersize=3)
     
     ax.set_xlabel('Timestep', fontsize=10)
-    ax.set_ylabel('Reward', fontsize=10)
+    ax.set_ylabel('Learned Reward', fontsize=10)
     ax.set_title(f'Sample {i+1} (Length: {len(sample_reward)})', fontsize=11, fontweight='bold')
     ax.grid(True)
     ax.legend(loc='upper right', fontsize=8)
   
   plt.suptitle('Sample Trajectories', fontsize=14, fontweight='bold', y=0.995)
   plt.tight_layout()
-  output_path = os.path.join(output_dir, f'{exp_name}_sample_trajs_reward.png')
+  output_path = os.path.join(output_dir, f'{exp_name}_sample-trajs_learn-reward.png')
   plt.savefig(output_path, dpi=300, bbox_inches='tight')
   plt.close()
   
@@ -130,6 +131,7 @@ def plot_results(rewards, output_dir, exp_name):
   padded_rewards, lengths = pad_trajectories(rewards)
   
   # mean reward per timestep with trajectory lengths bar chart
+  print(f"Plotting mean reward per timestep and trajectory lengths...")
   fig, axs = plt.subplots(2, 1, figsize=(12, 10))
   
   # calculate mean and std per timestep (ignoring NaNs)
@@ -155,7 +157,7 @@ def plot_results(rewards, output_dir, exp_name):
   axs[1].grid(True, alpha=0.3, axis='y')
   
   plt.tight_layout()
-  output_path = os.path.join(output_dir, f'{exp_name}_mean_std_rewards.png')
+  output_path = os.path.join(output_dir, f'{exp_name}_mean-std_learn-rewards.png')
   plt.savefig(output_path, dpi=300, bbox_inches='tight')
   plt.close()
   
@@ -179,7 +181,7 @@ def main(args):
   print(f"Goal embedding computed - shape: {goal_emb.shape}")
   
   # compute reward signals
-  rewards = compute_reward_signals(valid_loader, goal_emb, dist_scale)
+  rewards = compute_reward_signals(model, valid_loader, goal_emb, dist_scale, device)
   print(f"Computed {len(rewards)} reward signals")
   
   # plot results
