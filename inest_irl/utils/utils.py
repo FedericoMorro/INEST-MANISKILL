@@ -26,18 +26,17 @@ from gymnasium.wrappers import RescaleAction
 import matplotlib.pyplot as plt
 from ml_collections import config_dict
 import numpy as np
-from sac import replay_buffer
-from sac import wrappers
 import torch
 from torchkit import CheckpointManager
 from torchkit.experiment import git_revision_hash
-from xirl import common
 import mani_skill
 import mani_skill.envs.tasks as mani_envs
 import mani_skill
 import mani_skill.envs.tasks as mani_envs
 import importlib
 
+from inest_irl.sac import replay_buffer, wrappers
+from xirl import common
 
 import yaml
 

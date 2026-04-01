@@ -20,16 +20,17 @@ import os.path as osp
 from absl import app
 from absl import flags
 from absl import logging
-from base_configs import validate_config
 from ml_collections import config_flags
 import torch
 from torchkit import CheckpointManager
 from torchkit import experiment
 from torchkit import Logger
 from torchkit.utils.py_utils import Stopwatch
-from utils import setup_experiment
 from xirl import common
 import wandb
+
+from configs import validate_config
+from inest_irl.utils.utils import setup_experiment
 
 # pylint: disable=logging-fstring-interpolation
 
@@ -43,7 +44,7 @@ flags.DEFINE_boolean("wandb", False, "Log on W&B.")
 
 config_flags.DEFINE_config_file(
     "config",
-    "base_configs/pretrain.py",
+    "/home/fmorro/INEST-MANISKILL/scripts/configs/pretrain.py",
     "File path to the training hyperparameter configuration.",
 )
 

@@ -28,8 +28,6 @@ import mani_skill.envs
 from ml_collections import config_dict
 from ml_collections import config_flags
 import numpy as np
-from sac import agent
-from sac import replay_buffer
 import torch
 from torchkit import CheckpointManager
 from torchkit import experiment
@@ -46,6 +44,9 @@ from types import MethodType
 
 import time
 
+from inest_irl.sac import agent
+from inest_irl.sac import replay_buffer
+
 # pylint: disable=logging-fstring-interpolation
 
 FLAGS = flags.FLAGS
@@ -59,7 +60,7 @@ flags.DEFINE_boolean("wandb", False, "Log on W&B.")
 
 config_flags.DEFINE_config_file(
     "config",
-    "base_configs/rl.py",
+    "/home/fmorro/INEST-MANISKILL/scripts/configs/rl.py",
     "File path to the training hyperparameter configuration.",
 )
 

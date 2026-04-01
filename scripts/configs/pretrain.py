@@ -54,7 +54,7 @@ def get_config():
   # The mini-batch size. Note this only specifies the number of videos to
   # load frames from in a single batch. The effective batch size is actually
   # larger since we sample multiple frame sequences per video.
-  config.data.batch_size = 8
+  config.data.batch_size = 4
   # Which action classes to select for creating the pretraining dataset. Leave
   # it empty to load all action classes.
   config.data.pretrain_action_class = ()
