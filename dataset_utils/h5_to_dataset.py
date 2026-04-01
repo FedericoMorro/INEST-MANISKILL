@@ -40,13 +40,14 @@ Sample h5 file structure assumed:
   traj_1: ...
 
 The structure of the dataset is as follows:
-    dataset/
-        train/
-        valid/
-            name/                           (by default, name of obs_key)
-                traj-idx(s)/
-                    frame-idx(s).png
-                    traj-idx_element(s).json -> list of lists
+  dataset/
+    subgoal_frames.json               (if found in the same folder as the h5 file)
+    train/
+    valid/
+      name/                           (by default, name of obs_key)
+        traj-idx(s)/
+          frame-idx(s).png
+          traj-idx_element(s).json -> list of lists
 """
 
 
@@ -55,6 +56,7 @@ import h5py
 import json
 import numpy as np
 import os
+import shutil
 from tqdm import tqdm
 from PIL import Image
 
@@ -66,87 +68,97 @@ OBJECTS_STATE_KEYS = ['env_states/actors/cubeA', 'env_states/actors/cubeB', 'env
 
 
 def _access_nested_group(group, key):
-    keys = key.split('/')
-    for k in keys:
-        group = group[k]
-    return group
+  keys = key.split('/')
+  for k in keys:
+    group = group[k]
+  return group
 
 
 def _save_data_as_json(group, keys, key_type, path, traj_idx):
-    for key in keys:
-        data = _access_nested_group(group, key)
-        data_list = np.array(data).tolist()  # convert to list for json serialization
-        key_prefix = f'{key_type}-' if key_type else ''
-        json_path = os.path.join(path, f'{traj_idx}_{key_prefix}{key.split("/")[-1]}.json')
-        with open(json_path, 'w') as f:
-            json.dump(data_list, f)
+  for key in keys:
+    data = _access_nested_group(group, key)
+    data_list = np.array(data).tolist()  # convert to list for json serialization
+    key_prefix = f'{key_type}-' if key_type else ''
+    json_path = os.path.join(path, f'{traj_idx}_{key_prefix}{key.split("/")[-1]}.json')
+    with open(json_path, 'w') as f:
+      json.dump(data_list, f)
 
 
 def handle_traj(group, path, idx):
-    # save a frame-idx.png for each frame in the trajectory
-    obs = _access_nested_group(group, OBS_KEY)
-    for i in range(obs.shape[0]):
-        frame_path = os.path.join(path, f'{i}.png')
-        Image.fromarray(obs[i]).save(frame_path)
+  # save a frame-idx.png for each frame in the trajectory
+  obs = _access_nested_group(group, OBS_KEY)
+  for i in range(obs.shape[0]):
+    frame_path = os.path.join(path, f'{i}.png')
+    Image.fromarray(obs[i]).save(frame_path)
     
-    # save a traj-idx_element.json for each trajectory element
-    _save_data_as_json(group, ACTION_KEYS, None, path, idx)
-    _save_data_as_json(group, ROBOT_STATE_KEYS, 'robot', path, idx)
-    _save_data_as_json(group, OBJECTS_STATE_KEYS, 'objects', path, idx)
+  # save a traj-idx_element.json for each trajectory element
+  _save_data_as_json(group, ACTION_KEYS, None, path, idx)
+  _save_data_as_json(group, ROBOT_STATE_KEYS, 'robot', path, idx)
+  _save_data_as_json(group, OBJECTS_STATE_KEYS, 'objects', path, idx)
 
 
 
 def main(args):
+  # set random seed for reproducibility
+  np.random.seed(args.random_seed)
 
-    # handle dataset path
-    if args.dataset_path is None:
-        args.dataset_path = args.h5_path.replace('.h5', '_dataset')
-    os.makedirs(args.dataset_path, exist_ok=True)
-    print(f'Dataset will be saved to: {args.dataset_path}')
+  # handle dataset path
+  if args.dataset_path is None:
+    args.dataset_path = args.h5_path.replace('.h5', '_dataset')
+  os.makedirs(args.dataset_path, exist_ok=True)
+  print(f'Dataset will be saved to: {args.dataset_path}')
 
-    # create needed nesting
-    name = f'{OBS_KEY.split("/")[-2]}-{OBS_KEY.split("/")[-1]}'
+  # create needed nesting
+  name = f'{OBS_KEY.split("/")[-2]}-{OBS_KEY.split("/")[-1]}'
 
-    train_path = os.path.join(args.dataset_path, 'train')
-    train_path = os.path.join(train_path, name)
-    os.makedirs(train_path, exist_ok=True)
+  train_path = os.path.join(args.dataset_path, 'train')
+  train_path = os.path.join(train_path, name)
+  os.makedirs(train_path, exist_ok=True)
 
-    valid_path = os.path.join(args.dataset_path, 'valid')
-    valid_path = os.path.join(valid_path, name)
-    os.makedirs(valid_path, exist_ok=True)
+  valid_path = os.path.join(args.dataset_path, 'valid')
+  valid_path = os.path.join(valid_path, name)
+  os.makedirs(valid_path, exist_ok=True)
 
-    # open and read the h5 file
-    h5_file = h5py.File(args.h5_path, 'r')
-    traj_names = list(h5_file.keys())
-    print(f'Found {len(traj_names)} trajectories in the h5 file.')
+  # open and read the h5 file
+  h5_file = h5py.File(args.h5_path, 'r')
+  traj_names = list(h5_file.keys())
+  print(f'Found {len(traj_names)} trajectories in the h5 file.')
     
-    for traj_name in tqdm(h5_file, desc='Processing trajectories'):
-        traj_group = h5_file[traj_name]
+  for traj_name in tqdm(h5_file, desc='Processing trajectories'):
+    traj_group = h5_file[traj_name]
 
-        # create trajectory folder
-        traj_idx = traj_name.split('_')[-1]
-        if np.random.rand() < args.train_split:
-            traj_path = os.path.join(train_path, traj_idx)
-        else:
-            traj_path = os.path.join(valid_path, traj_idx)
-        os.makedirs(traj_path, exist_ok=True)
+    # create trajectory folder
+    traj_idx = traj_name.split('_')[-1]
+    if np.random.rand() < args.train_split:
+      traj_path = os.path.join(train_path, traj_idx)
+    else:
+      traj_path = os.path.join(valid_path, traj_idx)
+    os.makedirs(traj_path, exist_ok=True)
 
-        # handle trajectory data
-        handle_traj(traj_group, traj_path, traj_idx)
+    # handle trajectory data
+    handle_traj(traj_group, traj_path, traj_idx)
 
-    h5_file.close()
+  h5_file.close()
+
+  # if find subgoal_frames.json file, copy it in the dataset folder
+  subgoals_path = os.path.dirname(args.h5_path) + '/subgoal_frames.json'
+  if os.path.exists(subgoals_path):
+    shutil.copy(subgoals_path, args.dataset_path)
+    print(f'Found subgoal_frames.json file, copied to dataset folder')
+  else:
+    print(f'No subgoal_frames.json file found, skipping copy')
 
 
 if __name__ == '__main__':
-    arg_pars = argparse.ArgumentParser()
-    arg_pars.add_argument('--h5_path', type=str, required=True,
-                          help='Path to the h5 file')
-    arg_pars.add_argument('--dataset_path', type=str, default=None,
-                          help='Path to the dataset folder (if not specified, it will be the saame as the h5 file)')
-    arg_pars.add_argument('--train_split', type=float, default=0.9,
-                          help='Percentage of the data to be used for training (the rest will be used for validation)')
-    arg_pars.add_argument('--random_seed', type=int, default=22,
-                          help='Random seed for reproducibility')
-    args = arg_pars.parse_args()
+  arg_pars = argparse.ArgumentParser()
+  arg_pars.add_argument('--h5_path', type=str, required=True,
+                        help='Path to the h5 file')
+  arg_pars.add_argument('--dataset_path', type=str, default=None,
+                        help='Path to the dataset folder (if not specified, it will be the saame as the h5 file)')
+  arg_pars.add_argument('--train_split', type=float, default=0.9,
+                        help='Percentage of the data to be used for training (the rest will be used for validation)')
+  arg_pars.add_argument('--random_seed', type=int, default=22,
+                        help='Random seed for reproducibility')
+  args = arg_pars.parse_args()
 
-    main(args)
+  main(args)

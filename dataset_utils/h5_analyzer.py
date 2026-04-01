@@ -210,13 +210,22 @@ def _get_nested(h5obj, path):
 
 def _save_demo_videos(h5_file, demo_names, output_dir, subgoals_path=None):
     print("Saving demo videos with subgoal overlays (if provided)...")
-    out_dir = os.path.join(output_dir, "dataset_videos")
+    out_dir = os.path.join(output_dir, "videos")
     os.makedirs(out_dir, exist_ok=True)
 
+    if subgoals_path is None:
+        # check if in same folder as h5 file
+        dir_name = os.path.dirname(h5_file.filename)
+        expected_path = os.path.join(dir_name, "subgoal_frames.json")
+        if os.path.exists(expected_path):
+            subgoals_path = expected_path
+
     if subgoals_path is not None:
-        with open(subgoals_path, "r") as f:
+        with open(subgoals_path, 'r') as f:
             subgoal_data = json.load(f)
-        
+        print(f"Loaded subgoal frame data from: {subgoals_path}")
+    else:
+        print("No subgoal frame data found: not specified nor found in same folder as h5 file")
 
     for demo_name in tqdm(demo_names, desc="Demos"):
         demo = h5_file[demo_name]
@@ -260,19 +269,15 @@ def _save_demo_videos(h5_file, demo_names, output_dir, subgoals_path=None):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Inspect H5 file structure and optionally create visualizations/videos")
     parser.add_argument("filepath", type=str, help="Path to H5 file")
-    parser.add_argument("--vis", action="store_true", help="Visualize images and save per-trajectory videos")
+    parser.add_argument("--vis", action="store_true", help="Save per-trajectory videos")
     parser.add_argument("--traj", action="store_true", help="Create trajectory plot images")
     parser.add_argument("--stats", action="store_true", help="Create txt file with dataset stats")
     parser.add_argument("--output_path", type=str, default="out", help="Output directory for visualizations and stats")
-    parser.add_argument("--subgoals", type=str, default=None, help="Path to subgoal_frame.json (optional)")
+    parser.add_argument("--subgoals", type=str, default=None, help="Path to subgoal_frame.json (optional, if not specified, same folder as h5 file will be checked)")
     args = parser.parse_args()
 
     if not os.path.exists(args.output_path):
         os.makedirs(args.output_path, exist_ok=True)
-    base_name = os.path.basename(args.filepath).replace(".h5", "")
-    out_path = os.path.join(args.output_path, f"{base_name}_visualizations")
-    os.makedirs(out_path, exist_ok=True)
-    print(f"Output path for visualizations and stats: {out_path}")
 
     with h5py.File(args.filepath, 'r') as f:
         print(f"H5 File: {args.filepath}")
@@ -293,7 +298,13 @@ if __name__ == "__main__":
 
         # save videos if requested
         if args.vis:
-            _save_demo_videos(f, demo_names, output_dir=out_path, subgoals_path=args.subgoals)
+            _save_demo_videos(f, demo_names, output_dir=args.output_path, subgoals_path=args.subgoals)
+
+        # create output path for plots and stats
+        base_name = os.path.basename(args.filepath).replace(".h5", "")
+        out_path = os.path.join(args.output_path, f"{base_name}_visualizations")
+        os.makedirs(out_path, exist_ok=True)
+        print(f"Output path for visualizations and stats: {out_path}")
 
         # plot trajectory statistics if requested
         if args.traj:
