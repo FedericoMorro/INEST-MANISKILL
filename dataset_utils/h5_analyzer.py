@@ -1,38 +1,21 @@
-import h5py
 import argparse
+import h5py
+import json
+import matplotlib.pyplot as plt
 import numpy as np
 import os
-import matplotlib.pyplot as plt
+import re
+from tqdm import tqdm
+import warnings
+from PIL import Image, ImageDraw, ImageFont
 
-def inspect_h5_file(filepath, visualize=False, plot_traj=False, write_stats=False, output_dir="out"):
-    """Inspect H5 file structure and display demo information."""
-    
-    with h5py.File(filepath, 'r') as f:
-        print(f"H5 File: {filepath}")
-        print(f"Number of demos: {len(f.keys())}")
-        print("\nDemo structure:")
-        
-        # Get first demo only
-        demo_name = list(f.keys())[0]
-        demo = f[demo_name]
-        print(f"\n  {demo_name}:")
-        print(f"    Keys: {list(demo.keys())}")
-        
-        for key in demo.keys():
-            item = demo[key]
-            _display_item_recursive(item, key, indent=6)
-        
-        # Visualize images if requested
-        if visualize:
-            _visualize_images_from_demo(demo, output_dir=output_dir)
+try:
+    import imageio.v2 as imageio
+except Exception:
+    import imageio
 
-        # Plot trajectory statistics if requested
-        if plot_traj:
-            _plot_trajectory_stats(demo, output_dir=output_dir)
-
-        # Write dataset stats if requested
-        if write_stats:
-            _write_dataset_mse_stats(h5_file=f, output_dir=output_dir)
+IMAGE_KEY = 'obs/sensor_data/base_camera/rgb'
+FPS = 10
 
 
 def _display_item_recursive(item, key, indent=6):
@@ -44,43 +27,6 @@ def _display_item_recursive(item, key, indent=6):
         for subkey in item.keys():
             subitem = item[subkey]
             _display_item_recursive(subitem, subkey, indent + 2)
-
-
-def _visualize_images_from_demo(demo, output_dir):
-    """Visualize the first image from each camera observation."""
-    try:
-        import matplotlib.pyplot as plt
-
-        imgs = []
-        
-        # Navigate to sensor_data -> base_camera and hand_camera
-        if 'obs' in demo and isinstance(demo['obs'], h5py.Group):
-            obs = demo['obs']
-            if 'sensor_data' in obs and isinstance(obs['sensor_data'], h5py.Group):
-                sensor_data = obs['sensor_data']
-                for camera_name in ['base_camera', 'hand_camera']:
-                    if camera_name in sensor_data:
-                        camera = sensor_data[camera_name]
-                        if 'rgb' in camera:
-                            rgb_data = camera['rgb'][()]
-                            img = rgb_data[0]  # First frame
-                            imgs.append((camera_name, img))
-        
-        if imgs:
-            fig, axes = plt.subplots(1, len(imgs), figsize=(5 * len(imgs), 5))
-            if len(imgs) == 1:
-                axes = [axes]  # Ensure axes is iterable
-            for ax, (camera_name, img) in zip(axes, imgs):
-                ax.imshow(img)
-                ax.set_title(camera_name)
-                ax.axis('off')
-            plt.savefig(os.path.join(output_dir, "demo_images.png"), bbox_inches='tight', dpi=300)
-            plt.close()
-        else:
-            print("No images found in the demo for visualization.")
-
-    except ImportError:
-        print("matplotlib not installed for visualization")
 
 
 def _dataset_to_timeseries(array):
@@ -252,26 +198,111 @@ def _format_array(arr):
     return "[" + ", ".join(f"{x:.3f}" for x in arr) + "]"
 
 
+def _get_nested(h5obj, path):
+    keys = path.split('/')
+    obj = h5obj
+    for k in keys:
+        if k not in obj:
+            return None
+        obj = obj[k]
+    return obj
+
+
+def _save_demo_videos(h5_file, demo_names, output_dir, subgoals_path=None):
+    print("Saving demo videos with subgoal overlays (if provided)...")
+    out_dir = os.path.join(output_dir, "dataset_videos")
+    os.makedirs(out_dir, exist_ok=True)
+
+    if subgoals_path is not None:
+        with open(subgoals_path, "r") as f:
+            subgoal_data = json.load(f)
+        
+
+    for demo_name in tqdm(demo_names, desc="Demos"):
+        demo = h5_file[demo_name]
+        demo_idx = demo_name.split("_")[-1]
+        imgs = _get_nested(demo, IMAGE_KEY)
+        imgs = np.asarray(imgs)
+
+        # write video
+        video_path = os.path.join(out_dir, f"{demo_idx}.mp4")
+        writer = imageio.get_writer(video_path, fps=FPS)
+
+        sub_idxs = subgoal_data.get(demo_idx, []) if subgoals_path is not None else []
+        # create frames and write
+        for i in range(imgs.shape[0]):
+            frame = imgs[i]
+            # frame: numpy array HxWxC (uint8)
+            if not isinstance(frame, np.ndarray):
+                frame = np.asarray(frame)
+            if frame.dtype != np.uint8:
+                frame = np.clip(frame, 0, 255).astype(np.uint8)
+
+            # resize frame to 512x512 for better visualization
+            frame = np.array(Image.fromarray(frame).resize((512, 512)))
+
+            # add subgoal overlay if this frame is a subgoal frame
+            subgoal_num = sum(1 for idx in sub_idxs if idx <= i)
+            img = Image.fromarray(frame)
+            draw = ImageDraw.Draw(img)
+            try:
+                font = ImageFont.truetype("DejaVuSans.ttf", 36)
+            except Exception:
+                font = ImageFont.load_default()
+            draw.text((16, 16), f"Subgoal: {subgoal_num}", fill=(255, 255, 255), font=font)
+            img = np.asarray(img)
+            
+            writer.append_data(img.astype(np.uint8))
+
+        writer.close()
+
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Inspect H5 file structure")
+    parser = argparse.ArgumentParser(description="Inspect H5 file structure and optionally create visualizations/videos")
     parser.add_argument("filepath", type=str, help="Path to H5 file")
-    parser.add_argument("--vis", action="store_true", help="Visualize images")
+    parser.add_argument("--vis", action="store_true", help="Visualize images and save per-trajectory videos")
     parser.add_argument("--traj", action="store_true", help="Create trajectory plot images")
     parser.add_argument("--stats", action="store_true", help="Create txt file with dataset stats")
-    parser.add_argument("--output_path", type=str, default="out", help="Output path for replayed trajectory data and videos (default: same directory as input file)")
+    parser.add_argument("--output_path", type=str, default="out", help="Output directory for visualizations and stats")
+    parser.add_argument("--subgoals", type=str, default=None, help="Path to subgoal_frame.json (optional)")
     args = parser.parse_args()
 
     if not os.path.exists(args.output_path):
-        os.makedirs(args.output_path)
-    out_path = os.path.join(args.output_path, f"{args.filepath.replace('/', '_').replace('.h5', '_visualizations')}")
+        os.makedirs(args.output_path, exist_ok=True)
+    base_name = os.path.basename(args.filepath).replace(".h5", "")
+    out_path = os.path.join(args.output_path, f"{base_name}_visualizations")
     os.makedirs(out_path, exist_ok=True)
-    args.output_path = out_path
-    print(f"Output path for visualizations and stats: {args.output_path}")
+    print(f"Output path for visualizations and stats: {out_path}")
 
-    inspect_h5_file(
-        args.filepath,
-        visualize=args.vis,
-        plot_traj=args.traj,
-        write_stats=args.stats,
-        output_dir=args.output_path,
-    )
+    with h5py.File(args.filepath, 'r') as f:
+        print(f"H5 File: {args.filepath}")
+        print(f"Number of demos: {len(f.keys())}")
+        print("\nDemo structure:")
+        demo_names = list(f.keys())
+        if len(demo_names) == 0:
+            print("No demos found in the H5 file.")
+        else:
+            # inspect first demo structure
+            demo_name = demo_names[0]
+            demo = f[demo_name]
+            print(f"\n  {demo_name}:")
+            print(f"    Keys: {list(demo.keys())}")
+            for key in demo.keys():
+                item = demo[key]
+                _display_item_recursive(item, key, indent=6)
+
+        # save videos if requested
+        if args.vis:
+            _save_demo_videos(f, demo_names, output_dir=out_path, subgoals_path=args.subgoals)
+
+        # plot trajectory statistics if requested
+        if args.traj:
+            plots_dir = os.path.join(out_path, "plots")
+            os.makedirs(plots_dir, exist_ok=True)
+            # plot for first demo only (preserve prior behavior)
+            if len(demo_names) > 0:
+                _plot_trajectory_stats(f[demo_names[0]], output_dir=plots_dir)
+
+        # write dataset stats if requested
+        if args.stats:
+            _write_dataset_mse_stats(h5_file=f, output_dir=out_path)

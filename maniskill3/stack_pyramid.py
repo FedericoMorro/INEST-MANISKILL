@@ -1,3 +1,8 @@
+"""
+Modified from https://github.com/haosulab/ManiSkill/blob/8c8d33916e07984057cf3d30e5cb9d5c26377b03/mani_skill/envs/tasks/tabletop/stack_pyramid.py
+"""
+
+
 from typing import Any, Union
 
 import numpy as np
@@ -146,38 +151,52 @@ class StackPyramidEnv(BaseEnv):
         offset_BC = pos_B - pos_C
         offset_AC = pos_A - pos_C
 
-        def evaluate_cube_distance(offset, cube_a, cube_b, top_or_next):
-            xy_flag = (
-                torch.linalg.norm(offset[..., :2], axis=1)
-                <= torch.linalg.norm(2 * self.cube_half_size[:2]) + 0.005
-            )
-            z_flag = torch.abs(offset[..., 2]) > 0.02
-            if top_or_next == "top":
-                is_cubeA_on_cubeB = torch.logical_and(xy_flag, z_flag)
-            elif top_or_next == "next_to":
-                is_cubeA_on_cubeB = xy_flag
-            else:
-                return NotImplementedError(
-                    f"Expect top_or_next to be either 'top' or 'next_to', got {top_or_next}"
-                )
-
-            is_cubeA_static = cube_a.is_static(lin_thresh=1e-2, ang_thresh=0.5)
-            is_cubeA_grasped = self.agent.is_grasping(cube_a)
-
-            success = is_cubeA_on_cubeB & is_cubeA_static & (~is_cubeA_grasped)
-            return success.bool()
-
-        success_A_B = evaluate_cube_distance(
+        success_A_B = self._evaluate_cube_distance(
             offset_AB, self.cubeA, self.cubeB, "next_to"
         )
-        success_C_B = evaluate_cube_distance(offset_BC, self.cubeC, self.cubeB, "top")
-        success_C_A = evaluate_cube_distance(offset_AC, self.cubeC, self.cubeA, "top")
+        success_C_B = self._evaluate_cube_distance(offset_BC, self.cubeC, self.cubeB, "top")
+        success_C_A = self._evaluate_cube_distance(offset_AC, self.cubeC, self.cubeA, "top")
         success = torch.logical_and(
             success_A_B, torch.logical_and(success_C_B, success_C_A)
         )
         return {
             "success": success,
         }
+
+    def _evaluate_cube_distance(self, offset, cube_a, cube_b, top_or_next):
+        xy_flag = (
+            torch.linalg.norm(offset[..., :2], axis=1)
+            <= torch.linalg.norm(2 * self.cube_half_size[:2]) + 0.005
+        )
+        z_flag = torch.abs(offset[..., 2]) > 0.02
+        if top_or_next == "top":
+            is_cubeA_on_cubeB = torch.logical_and(xy_flag, z_flag)
+        elif top_or_next == "next_to":
+            is_cubeA_on_cubeB = xy_flag
+        else:
+            return NotImplementedError(
+                f"Expect top_or_next to be either 'top' or 'next_to', got {top_or_next}"
+            )
+
+        is_cubeA_static = cube_a.is_static(lin_thresh=1e-2, ang_thresh=0.5)
+        is_cubeA_grasped = self.agent.is_grasping(cube_a)
+
+        success = is_cubeA_on_cubeB & is_cubeA_static & (~is_cubeA_grasped)
+        return success.bool()
+
+    def success_per_subgoal(self, success_type: str):
+        if success_type == "A_B":
+            return self._evaluate_cube_distance(
+                self.cubeA.pose.p - self.cubeB.pose.p, self.cubeA, self.cubeB, "next_to"
+            )
+        elif success_type == "C_B":
+            return self._evaluate_cube_distance(
+                self.cubeC.pose.p - self.cubeB.pose.p, self.cubeC, self.cubeB, "top"
+            )
+        elif success_type == "C_A":
+            return self._evaluate_cube_distance(
+                self.cubeC.pose.p - self.cubeA.pose.p, self.cubeC, self.cubeA, "top"
+            )
 
     def _get_obs_extra(self, info: dict):
         obs = dict(tcp_pose=self.agent.tcp.pose.raw_pose)
@@ -235,8 +254,8 @@ class StackPyramidEnv(BaseEnv):
         # Total reward
         return part1_reward + part2_reward
     
+
     def compute_normalized_dense_reward(
         self, obs: Any, action: torch.Tensor, info: dict
-    ):
-        
+    ): 
         return self.compute_dense_reward(obs=obs, action=action, info=info) / 2.0

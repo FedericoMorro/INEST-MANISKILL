@@ -1,3 +1,12 @@
+"""
+Modified from https://github.com/haosulab/ManiSkill/blob/8c8d33916e07984057cf3d30e5cb9d5c26377b03/mani_skill/trajectory/replay_trajectory.py
+
+The modification allows to save division of episode in subtasks based on heuristic rules.
+This is only supported for the StackPyramid environment using the CPU simulation backend, as it is the one enabling the
+    possibility to save the video frames to then build the dataset, and WITHOUT action conversion.
+"""
+
+
 """Replay ManiSkill trajectories stored in HDF5 (.h5) format
 
 The replayed trajectory can use different observation modes and control modes.
@@ -19,6 +28,8 @@ import numpy as np
 import torch
 import tyro
 from tqdm import tqdm
+
+import json
 
 import mani_skill.envs
 from mani_skill.envs.utils.system.backend import CPU_SIM_BACKENDS
@@ -92,6 +103,10 @@ class Args:
     """Override width for all cameras (Default: 128)."""
     cam_height: Optional[int] = None
     """Override height for all cameras (Default: 128)."""
+    subtask_json: bool = False
+    """Whether to save a json file containing the subtask segmentation of the trajectory based on heuristic rules.
+    This is only supported for the StackPyramid environment, WITHOUT action conversion, and using the CPU simulation backend.
+    File will be called subgoal_frames.json."""
 
 
 @dataclass
@@ -258,6 +273,26 @@ def replay_parallelized_sim(
 def replay_cpu_sim(
     args: Args, env: RecordEpisode, ori_env, pbar, episodes, trajectories
 ):
+    # create dict to store subgoal frames if needed
+    if args.subtask_json and args.target_control_mode is None or ori_control_mode == args.target_control_mode:
+        # determine output dir (same logic as _main)
+        output_dir = args.output_path if args.output_path is not None else os.path.dirname(args.traj_path)
+        # when running multiple processes, write per-process files to avoid collisions
+        if getattr(args, "num_procs", 1) > 1:
+            json_file_name = f"subgoal_frames_{getattr(args, 'proc_id', 0)}.json"
+        else:
+            json_file_name = "subgoal_frames.json"
+        json_file_path = os.path.join(output_dir, json_file_name)
+
+        print(f"Creating subtask json file at {json_file_path}")
+        print(f"\033[93mNote: this processing is only supported for the StackPyramid environment\033[0m")
+        subtask_data = {}
+        subtask_enabled = True
+    elif args.subtask_json:
+        print(f"\033[93mWarning: subtask json file will not be created since action conversion is not supported when computing subtask segmentation\033[0m")
+        print(f"\033[93m         Leave args.target_control_mode as None or the same as the original control mode to enable subtask json saving\033[0m")
+        subtask_enabled = False
+
     successful_replays = 0
     for episode in episodes:
         sanity_check_and_format_seed(episode)
@@ -321,6 +356,12 @@ def replay_cpu_sim(
                 args.target_control_mode is None
                 or ori_control_mode == args.target_control_mode
             ):
+                # subgoals: (0) reach cubeA, (1) move cubeA, (2) reach cubeC, (3) stack cubeC on cubeA and cubeB
+                # get initial position of cube A, and init subgoal frames list
+                if subtask_enabled:
+                    prev_cubeA_pos = env.unwrapped.cubeA.pose.p
+                    subgoal_frames = []
+
                 n = len(ori_actions)
                 if pbar is not None:
                     pbar.reset(total=n)
@@ -328,6 +369,36 @@ def replay_cpu_sim(
                     if pbar is not None:
                         pbar.update()
                     _, _, _, truncated, info = env.step(a)
+
+                    # refer to https://github.com/haosulab/ManiSkill/blob/8c8d33916e07984057cf3d30e5cb9d5c26377b03/mani_skill/envs/tasks/tabletop/stack_pyramid.py
+                    #   or to ../stack_pyramid.py in this repo
+                    if subtask_enabled:
+
+                        def _is_equal_tensor(a, b, eps=1e-3):
+                            return torch.norm(a - b) < eps
+
+                        subgoal = len(subgoal_frames)
+                        curr_cubeA_pos = env.unwrapped.cubeA.pose.p
+                        curr_cubeB_pos = env.unwrapped.cubeB.pose.p
+                        curr_cubeC_pos = env.unwrapped.cubeC.pose.p
+                        if subgoal == 0 and not _is_equal_tensor(curr_cubeA_pos, prev_cubeA_pos):   # pose changed from init
+                            subgoal_frames.append(t)
+                        elif subgoal == 1 and (_is_equal_tensor(curr_cubeA_pos, prev_cubeA_pos)     # cubeA stopped moving after moving
+                                and env.unwrapped.success_per_subgoal("A_B")):        # and success A_B (A next to B)
+                            subgoal_frames.append(t)
+                            prev_cubeC_pos = curr_cubeC_pos
+                        elif subgoal == 2 and not _is_equal_tensor(curr_cubeC_pos, prev_cubeC_pos): # pose changed from init
+                            subgoal_frames.append(t)
+                        elif subgoal == 3 and (_is_equal_tensor(curr_cubeC_pos, prev_cubeC_pos)     # cubeC stopped moving after moving
+                                and env.unwrapped.success_per_subgoal("C_B") and env.unwrapped.success_per_subgoal("C_A")):        #  and success C_B and success C_A (C on top of A and B)
+                            subgoal_frames.append(t)
+
+                        subgoal = len(subgoal_frames)
+                        if subgoal == 1:    # update prev_cubeA_pos to check when it stops moving
+                            prev_cubeA_pos = curr_cubeA_pos
+                        elif subgoal == 3:  # update prev_cubeC_pos to check when it stops moving
+                            prev_cubeC_pos = curr_cubeC_pos
+
                     if args.use_env_states:
                         env.base_env.set_state_dict(ori_env_states[t])
                     if args.vis:
@@ -371,6 +442,8 @@ def replay_cpu_sim(
                     env.flush_trajectory()
                 if args.save_video:
                     env.flush_video(ignore_empty_transition=False)
+                if subtask_enabled:
+                    subtask_data[episode_id] = subgoal_frames
                 break
             else:
                 if args.verbose:
@@ -379,6 +452,11 @@ def replay_cpu_sim(
             env.flush_video(save=False)
             tqdm.write(f"Episode {episode_id} is not replayed successfully. Skipping")
 
+    if subtask_enabled:
+        with open(json_file_path, "w") as f:
+            json.dump(subtask_data, f, indent=2)
+        print(f"Subtask json file saved at {json_file_path}")
+
     return ReplayResult(
         num_replays=len(episodes), successful_replays=successful_replays
     )
@@ -386,6 +464,15 @@ def replay_cpu_sim(
 
 def _main_helper(x):
     return _main(*x)
+
+
+def _make_env(env_id, **kwargs):
+    """Create env, overriding StackPyramid to use local custom implementation."""
+    if env_id == "StackPyramid-v1":
+        import stack_pyramid as local_stack_pyramid
+
+        return local_stack_pyramid.StackPyramidEnv(**kwargs)
+    return gym.make(env_id, **kwargs)
 
 
 def _main(
@@ -399,6 +486,9 @@ def _main(
     num_procs=1,
 ):
     pbar = tqdm(position=proc_id, leave=None, unit="step", dynamic_ncols=True)
+    # expose process info on args so replay logic can write per-process outputs
+    args.proc_id = proc_id
+    args.num_procs = num_procs
 
     # Load HDF5 containing trajectories
     traj_path = args.traj_path
@@ -407,7 +497,7 @@ def _main(
     # Load associated json
     json_path = traj_path.replace(".h5", ".json")
     json_data = io_utils.load_json(json_path)
-    env = gym.make(env_id, **env_kwargs)
+    env = _make_env(env_id, **env_kwargs)
     if isinstance(env.action_space, gym.spaces.Dict):
         logger.warning(
             "We currently do not track which wrappers are used when recording trajectories but majority of the time in multi-agent envs with dictionary action spaces the actions are stored as flat vectors. We will flatten the action space with the ManiSkill provided FlattenActionSpaceWrapper. If you do not want this behavior you can copy the replay trajectory code yourself and modify it as needed."
@@ -445,7 +535,7 @@ def _main(
         if num_procs > 1:
             new_traj_name = new_traj_name + "." + str(proc_id)
         if args.target_control_mode is not None:
-            ori_env = gym.make(env_id, **ori_env_kwargs)
+            ori_env = _make_env(env_id, **ori_env_kwargs)
         else:
             ori_env = None
     else:
@@ -612,6 +702,34 @@ def main(args: Args):
             replay_results_list = [x[1] for x in res]
             trajectory_paths = [x[0] for x in res]
             pool.close()
+
+            # merge per-process subtask json files into a single output
+            if args.subtask_json:
+                output_dir = args.output_path if args.output_path is not None else os.path.dirname(traj_path)
+                merged_subtask = {}
+                found_files = []
+                for i in range(args.num_envs):
+                    if args.num_envs > 1:
+                        fname = os.path.join(output_dir, f"subgoal_frames_{i}.json")
+                    else:
+                        fname = os.path.join(output_dir, "subgoal_frames.json")
+
+                    if os.path.exists(fname):
+                        found_files.append(fname)
+                        with open(fname, "r") as f:
+                            data = json.load(f)
+                            merged_subtask.update(data)
+
+                if merged_subtask:
+                    final_path = os.path.join(output_dir, "subgoal_frames.json")
+                    with open(final_path, "w") as f:
+                        json.dump(merged_subtask, f, indent=2)
+                    print(f"Subtask json file saved at {final_path}")
+                    for fpath in found_files:
+                        if fpath != final_path and os.path.exists(fpath):
+                            tqdm.write(f"Remove {fpath}")
+                            os.remove(fpath)
+
             if args.save_traj:
                 # A hack to find the path
                 output_path = trajectory_paths[0][: -len("0.h5")] + "h5"
