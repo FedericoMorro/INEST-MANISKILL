@@ -33,7 +33,7 @@ def get_config():
   # ================================================= #
   # Main parameters.
   # ================================================= #
-  config.save_dir = "/home/liannello/xirl/experiment_results/6Subtask/MultipleSeed6Subtask/"
+  config.save_dir = "/home/fmorro/INEST-MANISKILL/experiments/train"
 
   # Set this to True to allow CUDA to find the best convolutional algorithm to
   # use for the given parameters. When False, cuDNN will deterministically
@@ -51,7 +51,7 @@ def get_config():
 
   config.reward_wrapper = ml_collections.ConfigDict()
   # config.reward_wrapper.pretrained_path = "/home/liannello/xirl/experiment_results/6Subtask/Allocentric_Pretrain/dataset=xmagical_mode=same_algo=xirl_embodiment=gripper_ALLO_6Subtasks"
-  config.reward_wrapper.pretrained_path = "/home/liannello/INEST-MANISKILL_experiments/pretraining/dataset=xmagical_mode=same_algo=xirl_embodiment=stackpyramid_uid=e86f9cd4-6d52-4888-bbbe-9e7c8c22ac5d"
+  config.reward_wrapper.pretrained_path = "/home/fmorro/INEST-MANISKILL/experiments/pretrain/batch-4"
   # Can be one of ['distance_to_goal', 'goal_classifier', holdr].
   config.reward_wrapper.type = ""
 

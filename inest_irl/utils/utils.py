@@ -239,9 +239,13 @@ def make_env(
     except Exception:
       # If both imports fail, proceed and let gym.raise the appropriate error.
       pass
+
+  #! create env with local StackPyramid, e.g.
+  if env_name == "StackPyramid-v1":
+    import stack_pyramid as local_stack_pyramid
     
   env = gym.make(
-    "StackPyramid-v1", # there are more tasks e.g. "PushCube-v1", "PegInsertionSide-v1", ...
+    env_name, # there are more tasks e.g. "PushCube-v1", "PegInsertionSide-v1", ...
     obs_mode="state", # there is also "state_dict", "rgbd", ...
     control_mode="pd_ee_delta_pos", # there is also "pd_joint_delta_pos", ...
     render_mode="rgb_array"

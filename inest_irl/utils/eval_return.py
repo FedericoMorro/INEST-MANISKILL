@@ -5,12 +5,14 @@ import typing
 from pathlib import Path
 
 import argparse
+import json
+import matplotlib.pyplot as plt
 import numpy as np
+import pickle
+import sys
 import torch
 from torchkit import CheckpointManager
 from tqdm.auto import tqdm
-import matplotlib.pyplot as plt
-import sys
 
 from utils import load_config_from_dir
 from xirl import common
@@ -19,6 +21,11 @@ from xirl.models import SelfSupervisedModel
 
 ModelType = SelfSupervisedModel
 DataLoaderType = typing.Dict[str, torch.utils.data.DataLoader]
+
+
+C_VALUE = 3.0   # additional reward for reaching any subgoal
+DISTANCE_THRESHOLDS = [10, 10, 10, 10]  # distance threshold for considering a subgoal reached (in embedding space)
+PATIENCE_THRESHOLD = 2  # number of consecutive timesteps below distance threshold to consider subgoal reached
 
 
 def _setup(experiment_path):
@@ -45,43 +52,115 @@ def _setup(experiment_path):
   # load data
   train_loader = common.get_downstream_dataloaders(config, False)["train"]
   valid_loader = common.get_downstream_dataloaders(config, False)["valid"]
+  #! note batch_size=1 is enforced in the dataloader
+
+  # search for subgoal_frames.json to plot also subgoal rewards
+  subgoal_frames_path = Path(config.data.root) / "subgoal_frames.json"
+  if subgoal_frames_path.exists():
+    with open(subgoal_frames_path, 'r') as f:
+      subgoal_frames = json.load(f)
+    print(f"Found subgoal frames file with {len(subgoal_frames)} trajectories - will compute and plot subgoal rewards")
+  else:
+    subgoal_frames = None
+    print("No subgoal frames file found - will only compute and plot rewards to final goal")
   
-  return model, train_loader, valid_loader, device
+  return model, train_loader, valid_loader, subgoal_frames, device
 
 
-def compute_goal_embedding(model, train_loader, device):
+def compute_goal_embedding(model, train_loader, subgoal_frames, device):
   """Compute the mean goal embedding from the last frames of trajectories"""
-  init_embs, goal_embs = [], []
+  init_embs, goal_embs, subgoal_embs_list = [], [], []
 
+  # get init, goal (final), and subgoals embeddings for each trajectory in the training set
   for class_name, class_loader in train_loader.items():
     for batch in tqdm(iter(class_loader), leave=False, desc=f"Embedding {class_name}"):
-      out = model.infer(batch["frames"].to(device))
+      out = model.infer(batch["frames"].to(device))   # batch_size=1 since hardcoded in downstream dataloader
       emb = out.numpy().embs  # shape: (seq_len, embedding_dim)
       
       init_embs.append(emb[0, :])   # first frame embedding
       goal_embs.append(emb[-1, :])  # last frame embedding
+
+      if subgoal_frames is not None:
+        traj_id = batch["video_name"][0].split('/')[-1]  # video name should be in format .../../video_id
+        subgoal_idxs = subgoal_frames[traj_id]
+
+        # if empty list, add empty lists inside with the length of the number of subgoals
+        if len(subgoal_embs_list) == 0:
+          for _ in range(len(subgoal_idxs)):
+            subgoal_embs_list.append([])
+
+        # add subgoal embeddings to the corresponding subgoal index list
+        for i, idx in enumerate(subgoal_idxs):
+          subgoal_embs_list[i].append(emb[idx, :])  # subgoal frame embedding
   
+  # compute mean goal embedding and distance scale
   goal_emb = np.mean(np.stack(goal_embs, axis=0), axis=0, keepdims=True)
   dist_to_goal = np.linalg.norm(np.stack(init_embs, axis=0) - goal_emb, axis=1).mean()
   dist_scale = 1.0 / (dist_to_goal + 1e-8)
+
+  # compute mean subgoal embeddings if subgoal frames are provided
+  if subgoal_frames is not None:
+    subgoal_embs = []
+    for traj_subgoal_embs in subgoal_embs_list:
+      subgoal_embs.append(np.mean(np.stack(traj_subgoal_embs, axis=0), axis=0, keepdims=True))
+  else:
+    subgoal_embs = None
   
-  return goal_emb, dist_scale
+  return goal_emb, subgoal_embs, dist_scale
 
 
-def compute_reward_signals(model, valid_loader, goal_emb, dist_scale, device):
+def compute_reward_signals(model, valid_loader, goal_emb, subgoal_embs, dist_scale, device):
   """Compute the negative distance to goal as reward signal for each trajectory"""
   rewards = []
+  traj_ids = []
+  subgoal_rewards = [] if subgoal_embs is not None else None
+  subgoal_reachs = [ [] for _ in range(len(subgoal_embs)) ] if subgoal_embs is not None else None
+  subgoal_dists = [ [] for _ in range(len(subgoal_embs)) ] if subgoal_embs is not None else None
   
   for class_name, class_loader in valid_loader.items():
     for batch in tqdm(iter(class_loader), leave=False, desc=f"Computing rewards for {class_name}"):
+      traj_id = batch["video_name"][0].split('/')[-1]
+      traj_ids.append(traj_id)
       out = model.infer(batch["frames"].to(device))
       traj_emb = out.numpy().embs  # shape: (seq_len, embedding_dim)
       
       # compute euclidean distance from each frame to goal
       dist = np.linalg.norm(goal_emb - traj_emb, axis=1)**2  # shape: (seq_len,)
+
+      # learned reward is negative distance to goal, scaled by the average distance to goal in the training set
       rewards.append(- dist * dist_scale)
-  
-  return rewards
+
+      # compute subgoal rewards if subgoal embeddings are provided
+      if subgoal_embs is not None:
+        for i, subgoal_emb in enumerate(subgoal_embs):
+          subgoal_dists[i].append( 
+            np.linalg.norm(subgoal_emb - traj_emb, axis=1)**2  # shape: (seq_len,)
+          )
+
+        # add them progressively at task completion
+        curr_subgoal_rewards = []
+        curr_subgoal_identifs = [np.nan for _ in range(len(subgoal_embs))]
+        subgoal_idx = 0
+        patience = 0
+        for t in range(len(dist)):
+          # manage patience counter
+          if subgoal_idx < len(subgoal_embs) and subgoal_dists[subgoal_idx][-1][t] < DISTANCE_THRESHOLDS[subgoal_idx]:
+            if patience >= PATIENCE_THRESHOLD:
+              subgoal_idx = subgoal_idx + 1
+              curr_subgoal_identifs[subgoal_idx - 1] = t
+              patience = 0
+            else:
+              patience = patience + 1
+          else:
+            patience = 0
+
+          curr_subgoal_rewards.append(rewards[-1][t] + C_VALUE * subgoal_idx)   # add C_VALUE for each subgoal reached
+
+        subgoal_rewards.append(np.array(curr_subgoal_rewards))  
+        for i, reach_step in enumerate(curr_subgoal_identifs):
+          subgoal_reachs[i].append(reach_step)
+
+  return rewards, traj_ids, subgoal_rewards, subgoal_dists, subgoal_reachs
 
 
 def pad_trajectories(rewards):
@@ -96,72 +175,113 @@ def pad_trajectories(rewards):
   return padded_rewards, lengths
 
 
-def plot_results(rewards, output_dir, exp_name):
-  """Plot mean reward per timestep and sample trajectory"""
+def _sanitize_plot_type(label):
+  normalized = label.lower().replace('learned', ' ')
+  normalized = normalized.replace('distance', 'dist')
+  normalized = normalized.replace('subgoal', 'sub')
+  normalized = normalized.replace('reward', 'rew')
+  normalized = "_".join(normalized.split())
+  return normalized.strip('_')
+
+
+def plot_trajectory_samples(rewards, traj_ids, output_dir, exp_name, subgoal_reachs, label="Learned Reward", count=None):
+  """Save one plot per trajectory in the eval set (optionally capped by count)."""
   os.makedirs(output_dir, exist_ok=True)
+  traj_out_dir = os.path.join(output_dir, "trajs")
+  os.makedirs(traj_out_dir, exist_ok=True)
+  plot_type = _sanitize_plot_type(label)
+
+  num_trajs = min(len(rewards), len(traj_ids))
+  num_to_plot = num_trajs if count is None or count < 0 else min(num_trajs, count)
   
-  # 4 sample trajectories in 2x2 grid
-  print(f"Plotting sample trajectories...")
-  fig, axes = plt.subplots(2, 2, figsize=(14, 10))
-  axes = axes.flatten()
-  
-  for i in range(4):
-    idx = np.random.choice(len(rewards)) 
+  print(f"Plotting trajectory-wise curves of {label.lower()}...")
+  for idx in tqdm(range(num_to_plot), desc=f"Plotting {plot_type}"):
     sample_reward = rewards[idx]
-    
-    ax = axes[i]
-    ax_twin = ax.twinx()
-    
+    traj_id = traj_ids[idx]
+
+    fig, ax = plt.subplots(1, 1, figsize=(12, 6))
     ax.plot(range(len(sample_reward)), sample_reward, 'b-', 
-                    linewidth=2, label='Reward', marker='o', markersize=3)
+                    linewidth=2, label=label, marker='o', markersize=3)
+
+    if subgoal_reachs is not None:
+      for j, subgoal_steps in enumerate(subgoal_reachs):
+        if idx < len(subgoal_steps):
+          step = subgoal_steps[idx]
+          if not np.isnan(step) and step < len(sample_reward):
+            vline_label = "Reached Subgoal" if j == 0 else None
+            ax.axvline(step, color='crimson', linestyle=':', linewidth=1.8, alpha=0.9, label=vline_label)
     
     ax.set_xlabel('Timestep', fontsize=10)
-    ax.set_ylabel('Learned Reward', fontsize=10)
-    ax.set_title(f'Sample {i+1} (Length: {len(sample_reward)})', fontsize=11, fontweight='bold')
+    ax.set_ylabel(label, fontsize=10)
+    ax.set_title(f'Trajectory {traj_id} (Length: {len(sample_reward)})', fontsize=11, fontweight='bold')
     ax.grid(True)
     ax.legend(loc='upper right', fontsize=8)
-  
-  plt.suptitle('Sample Trajectories', fontsize=14, fontweight='bold', y=0.995)
-  plt.tight_layout()
-  output_path = os.path.join(output_dir, f'{exp_name}_sample-trajs_learn-reward.png')
-  plt.savefig(output_path, dpi=300, bbox_inches='tight')
-  plt.close()
+
+    plt.tight_layout()
+    output_path = os.path.join(traj_out_dir, f'{traj_id}_{plot_type}.png')
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.close()
+
+
+def plot_results(rewards, output_dir, exp_name, subgoal_reachs, label="Learned Reward"):
+  """Plot mean reward per timestep and return padded trajectories info."""
+  os.makedirs(output_dir, exist_ok=True)
   
   # pad trajectories for analysis
   padded_rewards, lengths = pad_trajectories(rewards)
   
-  # mean reward per timestep with trajectory lengths bar chart
-  print(f"Plotting mean reward per timestep and trajectory lengths...")
-  fig, axs = plt.subplots(2, 1, figsize=(12, 10))
+  # mean reward per timestep
+  print(f"Plotting mean reward per timestep of {label.lower()}...")
+  fig, ax = plt.subplots(1, 1, figsize=(12, 6))
   
   # calculate mean and std per timestep (ignoring NaNs)
   mean_reward = np.nanmean(padded_rewards, axis=0)
   std_reward = np.nanstd(padded_rewards, axis=0)
   timesteps = np.arange(len(mean_reward))
   
-  axs[0].plot(timesteps, mean_reward, 'b-', linewidth=2, label='Mean Reward')
-  axs[0].fill_between(timesteps, mean_reward - std_reward, mean_reward + std_reward, 
+  ax.plot(timesteps, mean_reward, 'b-', linewidth=2, label='Mean Reward')
+  ax.fill_between(timesteps, mean_reward - std_reward, mean_reward + std_reward, 
                     alpha=0.3, label='+-1 Std Dev')
-  axs[0].set_xlabel('Timestep', fontsize=12)
-  axs[0].set_ylabel('Learned Reward (Negative Distance to Goal)', fontsize=12)
-  axs[0].set_title(f'Mean Learned Reward per Timestep (N={len(rewards)} trajectories)', 
+
+  # aggregate each subgoal across trajectories and mark mean reaching timestep
+  if subgoal_reachs is not None and len(subgoal_reachs) > 0:
+    for subgoal_i, subgoal_steps in enumerate(subgoal_reachs):
+      reached_steps = [step for step in subgoal_steps if not np.isnan(step)]
+      if len(reached_steps) == 0:
+        continue
+
+      mean_step = float(np.mean(reached_steps))
+      mean_label = f'Subgoal mean reach' if subgoal_i == 0 else None
+      ax.axvline(mean_step, color='crimson', linestyle=':', linewidth=2, alpha=0.95, label=mean_label)
+
+  ax.set_xlabel('Timestep', fontsize=12)
+  ax.set_ylabel(label, fontsize=12)
+  ax.set_title(f'Mean {label} per Timestep (N={len(rewards)} trajectories)', 
                 fontsize=14, fontweight='bold')
-  axs[0].grid(True, alpha=0.3)
-  axs[0].legend(fontsize=10)
-  
-  # bar chart of trajectory lengths
-  axs[1].hist(lengths, bins=20, edgecolor='black', alpha=0.7, color='skyblue')
-  axs[1].set_xlabel('Length (timesteps)', fontsize=11)
-  axs[1].set_ylabel('Count', fontsize=11)
-  axs[1].set_title('Trajectory Lengths', fontsize=12, fontweight='bold')
-  axs[1].grid(True, alpha=0.3, axis='y')
+  ax.grid(True, alpha=0.3)
+  ax.legend(fontsize=10)
   
   plt.tight_layout()
-  output_path = os.path.join(output_dir, f'{exp_name}_mean-std_learn-rewards.png')
+  output_path = os.path.join(output_dir, f'mean-std_{_sanitize_plot_type(label)}.png')
   plt.savefig(output_path, dpi=300, bbox_inches='tight')
   plt.close()
   
   return padded_rewards, lengths, mean_reward
+
+
+def plot_trajectory_lengths(lengths, output_dir, exp_name):
+  """Plot trajectory length histogram once per evaluation run."""
+  print("Plotting trajectory lengths...")
+  fig, ax = plt.subplots(1, 1, figsize=(12, 4))
+  ax.hist(lengths, bins=20, edgecolor='black', alpha=0.7, color='skyblue')
+  ax.set_xlabel('Length (timesteps)', fontsize=11)
+  ax.set_ylabel('Count', fontsize=11)
+  ax.set_title('Trajectory Lengths', fontsize=12, fontweight='bold')
+  ax.grid(True, alpha=0.3, axis='y')
+  plt.tight_layout()
+  output_path = os.path.join(output_dir, 'traj-lengths.png')
+  plt.savefig(output_path, dpi=300, bbox_inches='tight')
+  plt.close()
 
 
 def main(args):
@@ -171,22 +291,79 @@ def main(args):
   np.random.seed(22)
   torch.backends.cudnn.deterministic = True
   torch.backends.cudnn.benchmark = False
-  
-  # Setup model and data
+
+  exp_name = args.experiment_path.strip('/').split('/')[-1]
+  out_dir = os.path.join(args.output_dir, exp_name)
+  os.makedirs(out_dir, exist_ok=True)
+
+  # setup model and data
   print(f"Loading model from: {args.experiment_path}")
-  model, train_loader, valid_loader, device = _setup(args.experiment_path)
-  
-  # Compute goal embedding
-  goal_emb, dist_scale = compute_goal_embedding(model, train_loader, device)
-  print(f"Goal embedding computed - shape: {goal_emb.shape}")
+  model, train_loader, valid_loader, subgoal_frames, device = _setup(args.experiment_path)
+
+  # check for cached results in output directory
+  cache_path = os.path.join(out_dir, 'rew_cache.pkl')
+  if not os.path.exists(cache_path):
+    print("No cached embedddings found - computing from scratch...")
+
+    # compute goal embedding
+    goal_emb, subgoal_embs, dist_scale = compute_goal_embedding(model, train_loader, subgoal_frames, device)
+    print(f"Goal embedding computed - shape: {goal_emb.shape}")
+    if subgoal_embs is not None:
+      print(f"Subgoals identified: {len(subgoal_embs)} - shape: {subgoal_embs[0].shape}")
+
+    # save goal and subgoal embeddings to cache for future use
+    with open(cache_path, 'wb') as f:
+      pickle.dump((goal_emb, subgoal_embs, dist_scale), f)
+    print(f"Saved computed embeddings and distance scale to cache at: {cache_path}")
+
+  else:
+    print(f"Found cached embeddings at {cache_path} - loading...")
+    with open(cache_path, 'rb') as f:
+      goal_emb, subgoal_embs, dist_scale = pickle.load(f)
+    print(f"Goal embedding loaded - shape: {goal_emb.shape}")
+    if subgoal_embs is not None:
+      print(f"Subgoals identified: {len(subgoal_embs)} - shape: {subgoal_embs[0].shape}")
   
   # compute reward signals
-  rewards = compute_reward_signals(model, valid_loader, goal_emb, dist_scale, device)
+  (rewards, traj_ids, subgoal_rewards, subgoal_dists, subgoal_reachs
+  ) = compute_reward_signals(model, valid_loader, goal_emb, subgoal_embs, dist_scale, device)
   print(f"Computed {len(rewards)} reward signals")
+
+  # plot trajectory lengths once using base rewards, to understand distribution of trajectory lengths and mean-std plots better
+  _, lengths = pad_trajectories(rewards)
+  plot_trajectory_lengths(lengths, out_dir, exp_name)
+
+  # save one trajectory plot per eval sample (or up to count)
+  plot_trajectory_samples(rewards, traj_ids, out_dir, exp_name, None, label="Learned Reward", count=args.count)
   
   # plot results
-  plot_results(rewards, args.output_dir, args.experiment_path.strip('/').split('/')[-1])
-  print(f"Plots saved to: {args.output_dir}")
+  plot_results(rewards, out_dir, exp_name, None, label="Learned Reward")
+
+  if subgoal_rewards is not None:
+    plot_trajectory_samples(subgoal_rewards, traj_ids, out_dir, exp_name, subgoal_reachs, label="Learned Subgoal Reward", count=args.count)
+    plot_results(subgoal_rewards, out_dir, exp_name, subgoal_reachs, label="Learned Subgoal Reward")
+
+    for i, subgoal_dist in enumerate(subgoal_dists):
+      plot_trajectory_samples(subgoal_dist, traj_ids, out_dir, exp_name, subgoal_reachs, label=f"Distance to Subgoal {i+1}", count=args.count)
+      plot_results(subgoal_dist, out_dir, exp_name, subgoal_reachs, label=f"Distance to Subgoal {i+1}")
+
+    # save .txt with per trajectory subgoal reaching timesteps
+    traj_substep = []
+    for subgoal_idx, subgoal_steps in enumerate(subgoal_reachs):
+      for traj_idx, subgoal_step in enumerate(subgoal_steps):
+        if len(traj_substep) < traj_idx + 1:
+          traj_substep.append([])
+        else:
+          traj_substep[traj_idx].append(subgoal_step)
+
+    with open(os.path.join(out_dir, 'sub_reaching_timesteps.txt'), 'w') as f:
+      f.write("Trajectory ID: Subgoal i-th reaching timesteps (NaN if not reached)\n")
+      for i, ts in enumerate(traj_substep):
+        f.write(f"{i:>4.0f}: " + ", ".join([f"{t:3.0f}" for t in ts]) + "\n")
+
+          
+
+  print(f"All results saved to: {out_dir}")
 
 
 if __name__ == "__main__":
@@ -195,6 +372,8 @@ if __name__ == "__main__":
                           help="Path to the pretraining experiment directory")
   arg_parser.add_argument("--output_dir", type=str, default="/home/fmorro/INEST-MANISKILL/out/reward_plots",
                           help="Directory to save the generated plots")
+  arg_parser.add_argument("--count", type=int, default=-1,
+                          help="Maximum number of trajectory-wise plots to save per plot type (-1 plots all trajectories)")
   args = arg_parser.parse_args()
 
   main(args)

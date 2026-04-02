@@ -22,7 +22,6 @@ from typing import Dict
 from absl import app
 from absl import flags
 from absl import logging
-from base_configs import validate_config
 import gymnasium as gym
 import mani_skill.envs
 from ml_collections import config_dict
@@ -33,8 +32,6 @@ from torchkit import CheckpointManager
 from torchkit import experiment
 from torchkit import Logger
 from tqdm.auto import tqdm
-import utils
-from utils import flatten_observation
 import wandb
 
 import os
@@ -44,15 +41,18 @@ from types import MethodType
 
 import time
 
+from configs import validate_config
 from inest_irl.sac import agent
 from inest_irl.sac import replay_buffer
+import inest_irl.utils.utils as utils
+from inest_irl.utils.utils import flatten_observation
 
 # pylint: disable=logging-fstring-interpolation
 
 FLAGS = flags.FLAGS
 
 flags.DEFINE_string("experiment_name", None, "Experiment name.")
-flags.DEFINE_string("env_name", None, "The environment name.")
+flags.DEFINE_string("env_name", "StackPyramid-v1", "The environment name.")
 flags.DEFINE_integer("seed", 0, "RNG seed.")
 flags.DEFINE_string("device", "cuda:0", "The compute device.")
 flags.DEFINE_boolean("resume", False, "Resume experiment from last checkpoint.")
@@ -67,9 +67,7 @@ config_flags.DEFINE_config_file(
 def safe_render(env, mode="rgb_array", **kwargs):
     """Safely call env.render, handling ManiSkill/Gym differences and ensuring
     a single (H, W, 3) RGB NumPy frame is always returned (even if batched)."""
-    import numpy as np
-    import torch
-
+    
     frame = None
     try:
         # Try Gym-style render first
@@ -374,14 +372,14 @@ def main(_):
   if FLAGS.wandb:
     if FLAGS.resume:
         wandb_id = "mqx6ezio"
-        wandb.init(project="NewEnv", group="Stack_Pyramid_INEST_24", name="Stack_Pyramid_INEST_24", id=wandb_id, mode="online", resume="must")
+        wandb.init(project="StackPyramidRL", group="Stack_Pyramid_INEST_24", name=FLAGS.experiment_name, id=wandb_id, mode="online", resume="must")
     else:
-        wandb.init(project="NewEnv", group="Stack_Pyramid_INEST_42", name="Stack_Pyramid_INEST_42", mode="online")
+        wandb.init(project="StackPyramidRL", group="Stack_Pyramid_INEST_42", name=FLAGS.experiment_name, mode="online")
     wandb.config.update(FLAGS, allow_val_change=True)
     wandb.run.log_code(".")
     wandb.config.update(config.to_dict(), allow_val_change=True)
 
-  # Setup compute device.
+  # Setup compute device
   if torch.cuda.is_available():
     device = torch.device(FLAGS.device)
   else:
@@ -389,7 +387,7 @@ def main(_):
     device = torch.device("cpu")
   logging.info("Using device: %s", device)
 
-  # Set RNG seeds.
+  # Set RNG seeds
   if FLAGS.seed is not None:
     logging.info("RL experiment seed: %d", FLAGS.seed)
     experiment.seed_rngs(FLAGS.seed)
@@ -399,19 +397,19 @@ def main(_):
 
 
  
-  # Load env.
+  # Load env
   env = utils.make_env(
-      FLAGS.env_name,
-      FLAGS.seed,
-      action_repeat=config.action_repeat,
-      frame_stack=config.frame_stack,
+    FLAGS.env_name,
+    FLAGS.seed,
+    action_repeat=config.action_repeat,
+    frame_stack=config.frame_stack,
   )
   eval_env = utils.make_env(
-      FLAGS.env_name,
-      FLAGS.seed + 45,
-      action_repeat=config.action_repeat,
-      frame_stack=config.frame_stack,
-      save_dir=osp.join(exp_dir, "video", "eval"),
+    FLAGS.env_name,
+    FLAGS.seed + 7,
+    action_repeat=config.action_repeat,
+    frame_stack=config.frame_stack,
+    save_dir=osp.join(exp_dir, "video", "eval"),
   )
   
   # Patch render compatibility for both environments

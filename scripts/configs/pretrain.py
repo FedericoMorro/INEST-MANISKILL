@@ -27,7 +27,7 @@ def get_config():
   # General experiment params.
   # ============================================== #
   # The root directory where experiments will be saved.
-  config.root_dir = "/home/fmorro/INEST-MANISKILL/experiments"
+  config.root_dir = "/home/fmorro/INEST-MANISKILL/experiments/pretrain"
   # Rng seed. Set this to `none` to disable seeding.
   config.seed = 1
   # cudnn-related parameters that affect reproducibility.
