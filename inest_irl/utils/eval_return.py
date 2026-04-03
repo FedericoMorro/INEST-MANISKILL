@@ -27,6 +27,15 @@ C_VALUE = 3.0   # additional reward for reaching any subgoal
 DISTANCE_THRESHOLDS = [10, 10, 10, 10]  # distance threshold for considering a subgoal reached (in embedding space)
 PATIENCE_THRESHOLD = 2  # number of consecutive timesteps below distance threshold to consider subgoal reached
 
+# report-friendly plotting defaults (compact figure size with readable text)
+FIGSIZE_TRAJ = (7.0, 3.6)
+FIGSIZE_MEAN = (7.0, 3.6)
+FIGSIZE_HIST = (7.0, 2.8)
+FS_LABEL = 12
+FS_TITLE = 13
+FS_LEGEND = 10
+FS_TRAJ_TITLE = 12
+
 
 def _setup(experiment_path):
   """Load the latest embedder checkpoint and dataloaders"""
@@ -199,7 +208,7 @@ def plot_trajectory_samples(rewards, traj_ids, output_dir, exp_name, subgoal_rea
     sample_reward = rewards[idx]
     traj_id = traj_ids[idx]
 
-    fig, ax = plt.subplots(1, 1, figsize=(12, 6))
+    fig, ax = plt.subplots(1, 1, figsize=FIGSIZE_TRAJ)
     ax.plot(range(len(sample_reward)), sample_reward, 'b-', 
                     linewidth=2, label=label, marker='o', markersize=3)
 
@@ -211,11 +220,11 @@ def plot_trajectory_samples(rewards, traj_ids, output_dir, exp_name, subgoal_rea
             vline_label = "Reached Subgoal" if j == 0 else None
             ax.axvline(step, color='crimson', linestyle=':', linewidth=1.8, alpha=0.9, label=vline_label)
     
-    ax.set_xlabel('Timestep', fontsize=10)
-    ax.set_ylabel(label, fontsize=10)
-    ax.set_title(f'Trajectory {traj_id} (Length: {len(sample_reward)})', fontsize=11, fontweight='bold')
+    ax.set_xlabel('Timestep', fontsize=FS_LABEL)
+    ax.set_ylabel(label, fontsize=FS_LABEL)
+    ax.set_title(f'Trajectory {traj_id} (Length: {len(sample_reward)})', fontsize=FS_TRAJ_TITLE, fontweight='bold')
     ax.grid(True)
-    ax.legend(loc='upper right', fontsize=8)
+    ax.legend(fontsize=FS_LEGEND)
 
     plt.tight_layout()
     output_path = os.path.join(traj_out_dir, f'{traj_id}_{plot_type}.png')
@@ -232,7 +241,7 @@ def plot_results(rewards, output_dir, exp_name, subgoal_reachs, label="Learned R
   
   # mean reward per timestep
   print(f"Plotting mean reward per timestep of {label.lower()}...")
-  fig, ax = plt.subplots(1, 1, figsize=(12, 6))
+  fig, ax = plt.subplots(1, 1, figsize=FIGSIZE_MEAN)
   
   # calculate mean and std per timestep (ignoring NaNs)
   mean_reward = np.nanmean(padded_rewards, axis=0)
@@ -254,12 +263,12 @@ def plot_results(rewards, output_dir, exp_name, subgoal_reachs, label="Learned R
       mean_label = f'Subgoal mean reach' if subgoal_i == 0 else None
       ax.axvline(mean_step, color='crimson', linestyle=':', linewidth=2, alpha=0.95, label=mean_label)
 
-  ax.set_xlabel('Timestep', fontsize=12)
-  ax.set_ylabel(label, fontsize=12)
+  ax.set_xlabel('Timestep', fontsize=FS_LABEL)
+  ax.set_ylabel(label, fontsize=FS_LABEL)
   ax.set_title(f'Mean {label} per Timestep (N={len(rewards)} trajectories)', 
-                fontsize=14, fontweight='bold')
+                fontsize=FS_TITLE, fontweight='bold')
   ax.grid(True, alpha=0.3)
-  ax.legend(fontsize=10)
+  ax.legend(fontsize=FS_LEGEND)
   
   plt.tight_layout()
   output_path = os.path.join(output_dir, f'mean-std_{_sanitize_plot_type(label)}.png')
@@ -272,14 +281,14 @@ def plot_results(rewards, output_dir, exp_name, subgoal_reachs, label="Learned R
 def plot_trajectory_lengths(lengths, output_dir, exp_name):
   """Plot trajectory length histogram once per evaluation run."""
   print("Plotting trajectory lengths...")
-  fig, ax = plt.subplots(1, 1, figsize=(12, 4))
+  fig, ax = plt.subplots(1, 1, figsize=FIGSIZE_HIST)
   ax.hist(lengths, bins=20, edgecolor='black', alpha=0.7, color='skyblue')
-  ax.set_xlabel('Length (timesteps)', fontsize=11)
-  ax.set_ylabel('Count', fontsize=11)
-  ax.set_title('Trajectory Lengths', fontsize=12, fontweight='bold')
+  ax.set_xlabel('Length (timesteps)', fontsize=FS_LABEL)
+  ax.set_ylabel('Count', fontsize=FS_LABEL)
+  ax.set_title('Trajectory Lengths', fontsize=FS_TITLE, fontweight='bold')
   ax.grid(True, alpha=0.3, axis='y')
   plt.tight_layout()
-  output_path = os.path.join(output_dir, 'traj-lengths.png')
+  output_path = os.path.join(output_dir, 'traj-lens.png')
   plt.savefig(output_path, dpi=300, bbox_inches='tight')
   plt.close()
 
@@ -356,7 +365,7 @@ def main(args):
         else:
           traj_substep[traj_idx].append(subgoal_step)
 
-    with open(os.path.join(out_dir, 'sub_reaching_timesteps.txt'), 'w') as f:
+    with open(os.path.join(out_dir, 'sub_reach_times.txt'), 'w') as f:
       f.write("Trajectory ID: Subgoal i-th reaching timesteps (NaN if not reached)\n")
       for i, ts in enumerate(traj_substep):
         f.write(f"{i:>4.0f}: " + ", ".join([f"{t:3.0f}" for t in ts]) + "\n")
