@@ -46,14 +46,18 @@ def get_config():
   # ================================================= #
   # Wrappers.
   # ================================================= #
+  # Observation mode passed to ManiSkill gym.make (e.g., 'state', 'state_dict', 'rgbd').
+  config.obs_mode = "state"
+
   config.action_repeat = 1
   config.frame_stack = 3
 
   config.reward_wrapper = ml_collections.ConfigDict()
   # config.reward_wrapper.pretrained_path = "/home/liannello/xirl/experiment_results/6Subtask/Allocentric_Pretrain/dataset=xmagical_mode=same_algo=xirl_embodiment=gripper_ALLO_6Subtasks"
   config.reward_wrapper.pretrained_path = "/home/fmorro/INEST-MANISKILL/experiments/pretrain/batch-4"
-  # Can be one of ['distance_to_goal', 'goal_classifier', holdr].
-  config.reward_wrapper.type = ""
+  # Can be one of ['distance_to_goal', 'goal_classifier', 'inest', 'inest_knn', 'state_intrinsic', 'reds', 'env'].
+  # Use 'env' for baseline SAC with standard environment rewards.
+  config.reward_wrapper.type = None
 
   # Vector environment parameters for DDP
   config.num_envs_per_process = 3  # Number of parallel environments per DDP process
@@ -64,10 +68,10 @@ def get_config():
   config.num_train_steps = 30_000_000
   config.replay_buffer_capacity = 1_000_000
   config.num_seed_steps = 30_000
-  config.num_eval_episodes = 150
+  config.num_eval_episodes = 50 #150
   config.eval_frequency = 50_000
   config.checkpoint_frequency = 300_000
-  config.log_frequency = 20_000
+  config.log_frequency = 10_000 #20_000
   config.save_video = True
 
   # ================================================= #
@@ -78,7 +82,7 @@ def get_config():
   config.sac.obs_dim = obs_dim
   config.sac.action_dim = action_dim
   config.sac.action_range = action_range
-  config.sac.discount = 0.8
+  config.sac.discount = 0.99
   config.sac.init_temperature = 0.3
   config.sac.alpha_lr = 3e-4
   config.sac.alpha_betas = [0.9, 0.999]
@@ -91,6 +95,7 @@ def get_config():
   config.sac.critic_target_update_frequency = 2
   config.sac.batch_size = 2048
   config.sac.learnable_temperature = True
+  config.sac.target_entropy = None  # set to -|A| if None
 
   # ================================================= #
   # Critic parameters.

@@ -25,7 +25,7 @@ from mani_skill.utils.scene_builder.table import TableSceneBuilder
 from mani_skill.utils.structs.pose import Pose
 
 
-@register_env("StackPyramid-v1", max_episode_steps=250)
+@register_env("StackPyramid-v1custom", max_episode_steps=250)
 class StackPyramidEnv(BaseEnv):
     """
     **Task Description:**
@@ -45,14 +45,16 @@ class StackPyramidEnv(BaseEnv):
     """
 
     SUPPORTED_ROBOTS = ["panda_wristcam", "panda", "fetch"]
-    # SUPPORTED_REWARD_MODES = ["none", "sparse", "dense"]
+    SUPPORTED_REWARD_MODES = ["none", "sparse", "dense", "normalized_dense"]
 
     agent: Union[Panda, Fetch]
 
     def __init__(
         self, *args, robot_uids="panda_wristcam", robot_init_qpos_noise=0.02, **kwargs
     ):
+        print("Initializing custom StackPyramid environment")
         self.robot_init_qpos_noise = robot_init_qpos_noise
+        kwargs["reward_mode"] = "normalized_dense"
         super().__init__(*args, robot_uids=robot_uids, **kwargs)
 
     @property
@@ -168,7 +170,7 @@ class StackPyramidEnv(BaseEnv):
     def _evaluate_cube_distance(self, offset, cube_a, cube_b, top_or_next):
         xy_flag = (
             torch.linalg.norm(offset[..., :2], axis=1)
-            <= torch.linalg.norm(2 * self.cube_half_size[:2]) + 0.005
+            <= torch.linalg.norm(2 * self.cube_half_size[:2]) + 0.005   # 0.0616
         )
         z_flag = torch.abs(offset[..., 2]) > 0.02
         if top_or_next == "top":
@@ -220,44 +222,76 @@ class StackPyramidEnv(BaseEnv):
             )
         return obs
 
+    def _distance_to_reward(self, d,
+            alpha=0.006, b=500.0, beta=0.001,
+        ):
+        norm_c = - b * torch.log(torch.tensor(beta, device=d.device))   # f(d=0), so that reward is (-inf,1] normalized
+        rew = - alpha * d**2 - b * torch.log(d**2 + beta)
+        return rew / norm_c
+        #return 1.0 - d / 0.3   # linear version (need assumption 0.3 is max distance)
+
     def compute_dense_reward(self, obs: Any, action: torch.Tensor, info: dict):
-        # Get cube positions  
+        # get cube positions  
         pos_A = self.cubeA.pose.p
         pos_B = self.cubeB.pose.p
         pos_C = self.cubeC.pose.p
+
+        # get eef position
+        eef_pos = self.agent.tcp.pose.p
         
-        # Compute offsets like in evaluate function
+        # compute offsets like in evaluate function
         offset_AB = pos_A - pos_B
         offset_BC = pos_B - pos_C
         offset_AC = pos_A - pos_C
+
+        # perform evaluate to compute reward components and success bonuses
+        success_A_B = self._evaluate_cube_distance(offset_AB, self.cubeA, self.cubeB, "next_to")
+        success_C_B = self._evaluate_cube_distance(offset_BC, self.cubeC, self.cubeB, "top")
+        success_C_A = self._evaluate_cube_distance(offset_AC, self.cubeC, self.cubeA, "top")
+        success = torch.logical_and(success_A_B, torch.logical_and(success_C_B, success_C_A))
+
+        # identify current step
+        if success:
+            current_step = 2
+        elif success_A_B:
+            current_step = 1
+        else:
+            current_step = 0
+
+        # compute reward based on the step
+        if current_step == 0:
+            # reward based on distance of eef to cube A, and distance of cube A to cube B
+            distance_eef_A = torch.linalg.norm(eef_pos - pos_A)
+            distance_AB = torch.linalg.norm(offset_AB)
+            
+            # in [-1,0], equal component contribution
+            reward = -1.0 + (
+                self._distance_to_reward(distance_eef_A) +
+                self._distance_to_reward(distance_AB)
+            ) / 2.0
+
+        elif current_step == 1:
+            # reward based on distance of eef to cube C, and distance of cube C to cube A and B,
+            #   with height penalty if cube C is below 0.02 above the table
+            distance_eef_C = torch.linalg.norm(eef_pos - pos_C)
+            distance_AC = torch.linalg.norm(offset_AC)
+            distance_BC = torch.linalg.norm(offset_BC)
+            z_flag = torch.abs(offset_BC[..., 2]) > 0.02
+
+            # in [0,1], equal contribution eef-C and cubes-C, with penalty for C height
+            reward = (
+                self._distance_to_reward(distance_eef_C) +
+                (self._distance_to_reward(distance_AC) + self._distance_to_reward(distance_BC)) / 2.0 +
+                - 0.5 * (1 - z_flag.float())
+            ) / 2.0
+
+        else:
+            reward = 1.0
         
-        # Part 1: Cube A next to Cube B
-        distance_AB_xy = torch.linalg.norm(offset_AB[..., :2], axis=1)
-        target_distance = torch.linalg.norm(2 * self.cube_half_size[:2]) + 0.005
-        part1_reward = 1.0 - torch.tanh(5.0 * distance_AB_xy / target_distance)
-        
-        # Part 2: Cube C on top of both A and B 
-        # XY distances from C to both A and B
-        distance_AC_xy = torch.linalg.norm(offset_AC[..., :2], axis=1)
-        distance_BC_xy = torch.linalg.norm(offset_BC[..., :2], axis=1)
-        
-        # Height differences
-        height_AC = torch.abs(offset_AC[..., 2])
-        height_BC = torch.abs(offset_BC[..., 2])
-        
-        # Reward based on XY proximity to target and height above 0.02
-        xy_reward_AC = 1.0 - torch.tanh(5.0 * distance_AC_xy / target_distance)
-        xy_reward_BC = 1.0 - torch.tanh(5.0 * distance_BC_xy / target_distance)
-        height_reward_AC = torch.tanh(5.0 * torch.clamp(height_AC - 0.05, min=0.0))
-        height_reward_BC = torch.tanh(5.0 * torch.clamp(height_BC - 0.05, min=0.0))
-        
-        part2_reward = (xy_reward_AC + xy_reward_BC + height_reward_AC + height_reward_BC) / 4.0
-        
-        # Total reward
-        return part1_reward + part2_reward
+        return np.array(reward)
     
 
     def compute_normalized_dense_reward(
         self, obs: Any, action: torch.Tensor, info: dict
     ): 
-        return self.compute_dense_reward(obs=obs, action=action, info=info) / 2.0
+        return self.compute_dense_reward(obs=obs, action=action, info=info)

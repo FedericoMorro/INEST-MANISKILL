@@ -273,6 +273,7 @@ def replay_parallelized_sim(
 def replay_cpu_sim(
     args: Args, env: RecordEpisode, ori_env, pbar, episodes, trajectories
 ):
+    subtask_enabled = False
     # create dict to store subgoal frames if needed
     if args.subtask_json and args.target_control_mode is None:
         # determine output dir (same logic as _main)
@@ -291,7 +292,6 @@ def replay_cpu_sim(
     elif args.subtask_json:
         print(f"\033[93mWarning: subtask json file will not be created since action conversion is not supported when computing subtask segmentation\033[0m")
         print(f"\033[93m         Leave args.target_control_mode as None to enable subtask json saving\033[0m")
-        subtask_enabled = False
 
     successful_replays = 0
     for episode in episodes:

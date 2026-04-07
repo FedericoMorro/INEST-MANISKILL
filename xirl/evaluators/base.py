@@ -17,7 +17,7 @@
 
 import abc
 import dataclasses
-from typing import List, Optional, Union
+from typing import Dict, List, Optional, Union
 
 import numpy as np
 
@@ -29,7 +29,7 @@ class EvaluatorOutput:
   # An evaluator does not necessarily generate all fields below. For example,
   # some evaluators like Kendalls Tau return a scalar and image metric, while
   # TwoWayCycleConsistency only generates a scalar metric.
-  scalar: Optional[Union[float, List[float]]] = None
+  scalar: Optional[Union[float, List[float], Dict[str, float]]] = None
   image: Optional[Union[np.ndarray, List[np.ndarray]]] = None
   video: Optional[Union[np.ndarray, List[np.ndarray]]] = None
 
@@ -56,7 +56,13 @@ class EvaluatorOutput:
     # availability for *all* other members of the list.
     scalars = None
     if list_out[0].scalar is not None:
-      scalars = [o.scalar for o in list_out]
+      if isinstance(list_out[0].scalar, dict):
+        keys = list_out[0].scalar.keys()
+        scalars = {
+            k: float(np.mean([o.scalar[k] for o in list_out])) for k in keys
+        }
+      else:
+        scalars = [o.scalar for o in list_out]
     images = None
     if list_out[0].image is not None:
       images = [o.image for o in list_out]
@@ -68,9 +74,14 @@ class EvaluatorOutput:
   def log(self, logger, global_step, name, prefix):
     """Log the attributes to tensorboard."""
     if self.scalar is not None:
-      if isinstance(self.scalar, list):
-        self.scalar = np.mean(self.scalar)
-      logger.log_scalar(self.scalar, global_step, name, prefix)
+      if isinstance(self.scalar, dict):
+        for key, val in self.scalar.items():
+          logger.log_scalar(float(val), global_step, f"{name}/{key}", prefix)
+      elif isinstance(self.scalar, list):
+        mean_scalar = np.mean(self.scalar)
+        logger.log_scalar(mean_scalar, global_step, name, prefix)
+      else:
+        logger.log_scalar(self.scalar, global_step, name, prefix)
     if self.image is not None:
       if isinstance(self.image, list):
         for i, image in enumerate(self.image):
@@ -84,6 +95,26 @@ class EvaluatorOutput:
       else:
         logger.log_video(self.video, global_step, name, prefix)
     logger.flush()
+
+  def log_wandb(self, wandb_run, global_step, name, prefix):
+    """Log scalars and images to Weights & Biases (optional dependency)."""
+    import wandb
+
+    payload = {}
+    if self.scalar is not None:
+      if isinstance(self.scalar, dict):
+        for key, val in self.scalar.items():
+          payload[f"{prefix}/{name}/{key}"] = float(val)
+      elif isinstance(self.scalar, list):
+        payload[f"{prefix}/{name}/scalar_mean"] = float(np.mean(self.scalar))
+      else:
+        payload[f"{prefix}/{name}/scalar"] = float(self.scalar)
+    if self.image is not None:
+      imgs = self.image if isinstance(self.image, list) else [self.image]
+      for i, image in enumerate(imgs):
+        payload[f"{prefix}/{name}/image_{i}"] = wandb.Image(image)
+    if payload:
+      wandb_run.log(payload, step=global_step)
 
 
 class Evaluator(abc.ABC):

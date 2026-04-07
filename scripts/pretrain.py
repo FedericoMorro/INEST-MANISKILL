@@ -119,6 +119,8 @@ def main(_):
         if not global_step % config.logging_frequency:
           for k, v in train_loss.items():
             logger.log_scalar(v, global_step, k, "pretrain")
+            if FLAGS.wandb:
+              wandb.log(data={f"pretrain_train/{k}": v}, step=global_step)
           logger.flush()
 
         if not global_step % config.eval.eval_frequency:
@@ -129,6 +131,8 @@ def main(_):
           )
           for k, v in valid_loss.items():
             logger.log_scalar(v, global_step, k, "pretrain")
+            if FLAGS.wandb:
+              wandb.log(data={f"pretrain_valid/{k}": v}, step=global_step)
 
           # Evaluate the model on the downstream datasets.
           for split, downstream_loader in downstream_loaders.items():
@@ -145,15 +149,10 @@ def main(_):
                   eval_name,
                   f"downstream/{split}",
               )
-              
-              if eval_name == "kendalls_tau":
-                kendalls_tau = eval_out.scalar
-                if FLAGS.wandb:
-                  wandb.log({
-                      "kendalls_tau": kendalls_tau,
-                      "step": global_step,
-                      "epoch": epoch,
-                  }, step=global_step)
+              if FLAGS.wandb:
+                eval_out.log_wandb(
+                    wandb, global_step, eval_name, f"downstream_{split}"
+                )
               
         # Save model checkpoint.
         if not global_step % config.checkpointing_frequency:

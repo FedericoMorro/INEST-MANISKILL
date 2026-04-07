@@ -133,8 +133,8 @@ def setup_experiment(exp_dir, config, resume = False):
 
 
 def load_config_from_dir(
-    exp_dir,
-    config = None,
+  exp_dir,
+  config = None,
 ):
   """Load experiment config."""
   with open(os.path.join(exp_dir, "config.yaml"), "r") as fp:
@@ -155,9 +155,9 @@ def dump_config(exp_dir, config):
 
 
 def copy_config_and_replace(
-    config,
-    update_dict = None,
-    freeze = False,
+  config,
+  update_dict = None,
+  freeze = False,
 ):
   """Makes a copy of a config and optionally updates its values."""
   # Using the ConfigDict constructor leaves the `FieldReferences` untouched
@@ -205,12 +205,13 @@ def load_pickle(pretrained_path, name):
 
 
 def make_env(
-    env_name,
-    seed,
-    save_dir = None,
-    add_episode_monitor = True,
-    action_repeat = 1,
-    frame_stack = 1,
+  env_name,
+  seed,
+  save_dir = None,
+  add_episode_monitor = True,
+  action_repeat = 1,
+  frame_stack = 1,
+  obs_mode = "state",
 ):
   """Env factory with wrapping.
 
@@ -221,6 +222,7 @@ def make_env(
     add_episode_monitor: Set to True to wrap with `EpisodeMonitor`.
     action_repeat: A value > 1 will wrap with `ActionRepeat`.
     frame_stack: A value > 1 will wrap with `FrameStack`.
+    obs_mode: ManiSkill observation mode (e.g. 'state', 'state_dict', 'rgbd').
 
   Returns:
     gym.Env object.
@@ -241,15 +243,15 @@ def make_env(
       pass
 
   #! create env with local StackPyramid, e.g.
-  if env_name == "StackPyramid-v1":
-    import stack_pyramid as local_stack_pyramid
+  if env_name == "StackPyramid-v1custom":
+    import inest_irl.maniskill3.stack_pyramid as local_stack_pyramid
     
   env = gym.make(
     env_name, # there are more tasks e.g. "PushCube-v1", "PegInsertionSide-v1", ...
-    obs_mode="state", # there is also "state_dict", "rgbd", ...
-    control_mode="pd_ee_delta_pos", # there is also "pd_joint_delta_pos", ...
+    obs_mode=obs_mode,
+    control_mode="pd_ee_delta_pose", # pd_ee_delta_pos[e], with e includes also gripper quaternion orientation control
     render_mode="rgb_array"
-    )
+  )
 
   if add_episode_monitor:
     env = wrappers.EpisodeMonitor(env)
@@ -282,6 +284,9 @@ def wrap_learned_reward(env, config, device):
     gym.Env object.
   """
   print("Wrapping environment with learned reward wrapper...")
+  if config.reward_wrapper.type in ("env", "baseline", "environment"):
+    return wrappers.EnvironmentRewardBaselineWrapper(env)
+
   pretrained_path = config.reward_wrapper.pretrained_path
   # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
   model_config, model = load_model_checkpoint(pretrained_path, device)
@@ -349,11 +354,11 @@ def wrap_learned_reward(env, config, device):
 
 
 def make_buffer(
-    env,
-    device,
-    config,
-    flattened_obs_shape=None,
-    flattened_next_obs_shape=None,
+  env,
+  device,
+  config,
+  flattened_obs_shape=None,
+  flattened_next_obs_shape=None,
 ):
   """Replay buffer factory.
 
@@ -410,13 +415,13 @@ def plot_reward(rews):
 # ========================================= #
 
 def make_vector_env(
-    env_name,
-    num_envs,
-    seed_start,
-    save_dir = None,
-    add_episode_monitor = True,
-    action_repeat = 1,
-    frame_stack = 1,
+  env_name,
+  num_envs,
+  seed_start,
+  save_dir = None,
+  add_episode_monitor = True,
+  action_repeat = 1,
+  frame_stack = 1,
 ):
   """Create synchronized vector environment for DDP training.
   
@@ -486,10 +491,10 @@ def wrap_vector_learned_reward(venv, config, device):
 def wrap_learned_reward_single(env, config, device, model, model_config):
   """Wrap a single environment with learned reward."""
   kwargs = {
-      "env": env,
-      "model": model,
-      "device": device,
-      "res_hw": model_config.data_augmentation.image_size,
+    "env": env,
+    "model": model,
+    "device": device,
+    "res_hw": model_config.data_augmentation.image_size,
   }
   
   if config.reward_wrapper.type == "goal_classifier":

@@ -44,6 +44,7 @@ import time
 from configs import validate_config
 from inest_irl.sac import agent
 from inest_irl.sac import replay_buffer
+from inest_irl.sac import wrappers
 import inest_irl.utils.utils as utils
 from inest_irl.utils.utils import flatten_observation
 
@@ -52,8 +53,8 @@ from inest_irl.utils.utils import flatten_observation
 FLAGS = flags.FLAGS
 
 flags.DEFINE_string("experiment_name", None, "Experiment name.")
-flags.DEFINE_string("env_name", "StackPyramid-v1", "The environment name.")
-flags.DEFINE_integer("seed", 0, "RNG seed.")
+flags.DEFINE_string("env_name", "StackPyramid-v1custom", "The environment name.")
+flags.DEFINE_integer("seed", 22, "RNG seed.")
 flags.DEFINE_string("device", "cuda:0", "The compute device.")
 flags.DEFINE_boolean("resume", False, "Resume experiment from last checkpoint.")
 flags.DEFINE_boolean("wandb", False, "Log on W&B.")
@@ -403,12 +404,14 @@ def main(_):
     FLAGS.seed,
     action_repeat=config.action_repeat,
     frame_stack=config.frame_stack,
+    obs_mode=config.obs_mode,
   )
   eval_env = utils.make_env(
     FLAGS.env_name,
     FLAGS.seed + 7,
     action_repeat=config.action_repeat,
     frame_stack=config.frame_stack,
+    obs_mode=config.obs_mode,
     save_dir=osp.join(exp_dir, "video", "eval"),
   )
   
@@ -418,11 +421,26 @@ def main(_):
   print("Patching eval env render compatibility...")
   eval_env = patch_env_render_compatibility(eval_env)
   
-  if config.reward_wrapper.pretrained_path:
+  if config.reward_wrapper.type:
     print("Using learned reward wrapper.")
     env = utils.wrap_learned_reward(env, FLAGS.config, device=device)
     eval_env = utils.wrap_learned_reward(eval_env, FLAGS.config, device=device)
+  else:
+    print("Using baseline environment reward wrapper.")
+    env = wrappers.EnvironmentRewardBaselineWrapper(env)
+    eval_env = wrappers.EnvironmentRewardBaselineWrapper(eval_env)
 
+  def _print_nested_obs(obs, indent=2):
+    if isinstance(obs, dict):
+      for k, v in obs.items():
+        print(" " * indent + f"{k}:")
+        _print_nested_obs(v, indent + 2)
+    elif isinstance(obs, (list, tuple)):
+      for i, item in enumerate(obs):
+        print(" " * indent + f"[{i}]:")
+        _print_nested_obs(item, indent + 2)
+    else:
+      print(" " * indent + f"{obs} (shape: {getattr(obs, 'shape', None)}, dtype: {getattr(obs, 'dtype', None)})")
 
   # Dynamically set observation and action space values.
   # Get a sample observation to determine the flattened size
@@ -688,7 +706,7 @@ def main(_):
         #   env.reset_state()
 
         for k, v in info["episode"].items():
-          logger.log_scalar(v, info["total"]["timesteps"], k, "training")
+          _log_scalar_safe(logger, v, info["total"]["timesteps"], k, "training")
           if FLAGS.wandb:
             wandb.log({
                 f"train_done/{k}": v,
@@ -708,7 +726,7 @@ def main(_):
 
         if (i + 1) % config.log_frequency == 0:
           for k, v in train_info.items():
-            logger.log_scalar(v, info["total"]["timesteps"], k, "training")
+            _log_scalar_safe(logger, v, info["total"]["timesteps"], k, "training")
             if FLAGS.wandb:
               wandb.log({
                   f"train/{k}": v,
@@ -724,7 +742,8 @@ def main(_):
       if (i + 1) % config.eval_frequency == 0:
         eval_stats, episode_rewards = evaluate(policy, eval_env, config.num_eval_episodes)
         for k, v in eval_stats.items():
-          logger.log_scalar(
+          _log_scalar_safe(
+                            logger,
               v,
               info["total"]["timesteps"],
               f"average_{k}s",
@@ -751,6 +770,31 @@ def main(_):
   finally:
     checkpoint_manager.save(i)  # pylint: disable=undefined-loop-variable
     logger.close()
+
+
+def _to_scalar(value):
+  """Best-effort conversion of metric values to a scalar float."""
+  if value is None:
+    return None
+  if isinstance(value, torch.Tensor):
+    value = value.detach().cpu().numpy()
+  try:
+    arr = np.asarray(value, dtype=np.float64)
+  except (TypeError, ValueError):
+    return None
+  if arr.size == 0:
+    return None
+  return float(np.nanmean(arr))
+
+
+def _log_scalar_safe(logger, value, step, name, split):
+  """Log metric only when both step and value can be coerced to scalars."""
+  scalar_value = _to_scalar(value)
+  scalar_step = _to_scalar(step)
+  if scalar_value is None or scalar_step is None:
+    logging.warning("Skipping non-scalar metric '%s'", name)
+    return
+  logger.log_scalar(scalar_value, int(scalar_step), name, split)
 
 
 if __name__ == "__main__":

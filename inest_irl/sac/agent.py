@@ -215,8 +215,8 @@ class SAC(nn.Module):
         requires_grad=True,
     )
 
-    # Set target entropy to -|A|.
-    self.target_entropy = -config.critic.action_dim
+    # Set target entropy to -|A| if not specified.
+    self.target_entropy = config.target_entropy if config.target_entropy is not None else -config.critic.action_dim
 
     # Optimizers.
     self.actor_optimizer = torch.optim.Adam(

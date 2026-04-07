@@ -17,6 +17,13 @@ except Exception:
 IMAGE_KEY = 'obs/sensor_data/base_camera/rgb'
 FPS = 10
 
+# report-friendly plotting defaults (compact figure size with readable text)
+FIGSIZE_TRAJ = (7.0, 3.6)
+FIGSIZE_MEAN = (7.0, 3.6)
+FS_LABEL = 12
+FS_TITLE = 13
+FS_LEGEND = 9
+
 
 def _display_item_recursive(item, key, indent=6):
     """Recursively display item structure."""
@@ -73,16 +80,16 @@ def _collect_numeric_datasets(group, prefix, exclude_visual_tokens=False):
 
 def _plot_single_series(title, series, label_prefix, output_dir):
     """Plot one figure for a single numerical key, with one line per dimension."""
-    plt.figure(figsize=(12, 6))
+    fig, ax = plt.subplots(1, 1, figsize=FIGSIZE_TRAJ)
     timesteps = np.arange(series.shape[0])
     for dim in range(series.shape[1]):
-        plt.plot(timesteps, series[:, dim], label=f"{label_prefix}[{dim}]")
+        ax.plot(timesteps, series[:, dim], label=f"{label_prefix}[{dim}]", linewidth=1.6)
 
-    plt.title(title)
-    plt.xlabel("Timestep")
-    plt.ylabel("Value")
-    plt.grid(True, alpha=0.3)
-    plt.legend(loc="upper left", bbox_to_anchor=(1.02, 1.0), fontsize=8)
+    ax.set_title(title, fontsize=FS_TITLE, fontweight='bold')
+    ax.set_xlabel("Timestep", fontsize=FS_LABEL)
+    ax.set_ylabel("Value", fontsize=FS_LABEL)
+    ax.grid(True, alpha=0.3)
+    ax.legend(fontsize=FS_LEGEND)
     plt.tight_layout()
     filename = f"{title.lower().replace(':', '').replace('/', '-').replace(' ', '_')}.png"
     plt.savefig(os.path.join(output_dir, filename), bbox_inches='tight', dpi=300)
@@ -121,6 +128,11 @@ def _collect_all_numerical_series(demo):
 
     if "obs" in demo and isinstance(demo["obs"], h5py.Group):
         series.update(_collect_numeric_datasets(demo["obs"], prefix="obs", exclude_visual_tokens=True))
+
+    if "rewards" in demo and isinstance(demo["rewards"], h5py.Dataset):
+        ts = _dataset_to_timeseries(np.asarray(demo["rewards"][()]))
+        if ts is not None:
+            series["rewards"] = ts
 
     return series
 
@@ -208,24 +220,10 @@ def _get_nested(h5obj, path):
     return obj
 
 
-def _save_demo_videos(h5_file, demo_names, output_dir, subgoals_path=None):
+def _save_demo_videos(h5_file, demo_names, output_dir, subgoals_data=None):
     print("Saving demo videos with subgoal overlays (if provided)...")
     out_dir = os.path.join(output_dir, "videos")
     os.makedirs(out_dir, exist_ok=True)
-
-    if subgoals_path is None:
-        # check if in same folder as h5 file
-        dir_name = os.path.dirname(h5_file.filename)
-        expected_path = os.path.join(dir_name, "subgoal_frames.json")
-        if os.path.exists(expected_path):
-            subgoals_path = expected_path
-
-    if subgoals_path is not None:
-        with open(subgoals_path, 'r') as f:
-            subgoal_data = json.load(f)
-        print(f"Loaded subgoal frame data from: {subgoals_path}")
-    else:
-        print("No subgoal frame data found: not specified nor found in same folder as h5 file")
 
     for demo_name in tqdm(demo_names, desc="Demos"):
         demo = h5_file[demo_name]
@@ -237,7 +235,7 @@ def _save_demo_videos(h5_file, demo_names, output_dir, subgoals_path=None):
         video_path = os.path.join(out_dir, f"{demo_idx}.mp4")
         writer = imageio.get_writer(video_path, fps=FPS)
 
-        sub_idxs = subgoal_data.get(demo_idx, []) if subgoals_path is not None else []
+        sub_idxs = subgoals_data.get(demo_idx, []) if subgoals_data is not None else []
         # create frames and write
         for i in range(imgs.shape[0]):
             frame = imgs[i]
@@ -251,33 +249,113 @@ def _save_demo_videos(h5_file, demo_names, output_dir, subgoals_path=None):
             frame = np.array(Image.fromarray(frame).resize((512, 512)))
 
             # add subgoal overlay if this frame is a subgoal frame
-            subgoal_num = sum(1 for idx in sub_idxs if idx <= i)
-            img = Image.fromarray(frame)
-            draw = ImageDraw.Draw(img)
-            try:
-                font = ImageFont.truetype("DejaVuSans.ttf", 36)
-            except Exception:
-                font = ImageFont.load_default()
-            draw.text((16, 16), f"Subgoal: {subgoal_num}", fill=(255, 255, 255), font=font)
-            img = np.asarray(img)
-            
-            writer.append_data(img.astype(np.uint8))
+            if len(sub_idxs) == 0:
+                writer.append_data(frame)
+            else:
+                subgoal_num = sum(1 for idx in sub_idxs if idx <= i)
+                img = Image.fromarray(frame)
+                draw = ImageDraw.Draw(img)
+                try:
+                    font = ImageFont.truetype("DejaVuSans.ttf", 36)
+                except Exception:
+                    font = ImageFont.load_default()
+                draw.text((16, 16), f"Subgoal: {subgoal_num}", fill=(255, 255, 255), font=font)
+                img = np.asarray(img)
+                
+                writer.append_data(img.astype(np.uint8))
 
         writer.close()
+
+
+def _plot_reward_curves(h5_file, demo_names, subgoals_data=None, output_dir=None):
+    print("Plotting reward curves for all demos...")
+    out_dir = os.path.join(output_dir, "reward_curves")
+    os.makedirs(out_dir, exist_ok=True)
+
+    all_rewards = []
+    for demo_name in tqdm(demo_names, desc="Demos"):
+        demo = h5_file[demo_name]
+        demo_idx = demo_name.split("_")[-1]
+        rewards = _get_nested(demo, "rewards")
+        if rewards is None:
+            continue
+        rewards = np.asarray(rewards)
+        all_rewards.append(rewards)
+
+        fig, ax = plt.subplots(1, 1, figsize=FIGSIZE_TRAJ)
+        timesteps = np.arange(rewards.shape[0])
+        ax.plot(timesteps, rewards, label="Reward", linewidth=2)
+
+        sub_idxs = subgoals_data.get(demo_idx, []) if subgoals_data is not None else []
+        for idx in sub_idxs:
+            ax.axvline(x=idx, color='crimson', linestyle=':', linewidth=1.8, alpha=0.9, label="Subgoal" if idx == sub_idxs[0] else None)
+
+        ax.set_title(f"Trajectory {demo_idx} (Length: {rewards.shape[0]})", fontsize=FS_TITLE, fontweight='bold')
+        ax.set_xlabel("Timestep", fontsize=FS_LABEL)
+        ax.set_ylabel("Reward", fontsize=FS_LABEL)
+        ax.grid(True, alpha=0.3)
+        ax.legend(fontsize=FS_LEGEND)
+        plt.tight_layout()
+        filename = f"{demo_idx}.png"
+        plt.savefig(os.path.join(out_dir, filename), bbox_inches='tight', dpi=300)
+        plt.close()
+
+    if len(all_rewards) > 0:
+        all_rewards = np.array([r for r in all_rewards], dtype=object)
+        max_len = max(len(r) for r in all_rewards)
+        rewards_padded = np.full((len(all_rewards), max_len), np.nan)
+        for i, r in enumerate(all_rewards):
+            rewards_padded[i, :len(r)] = r
+        
+        fig, ax = plt.subplots(1, 1, figsize=FIGSIZE_MEAN)
+        timesteps = np.arange(max_len)
+        mean_rewards = np.nanmean(rewards_padded, axis=0)
+        std_rewards = np.nanstd(rewards_padded, axis=0)
+        
+        ax.plot(timesteps, mean_rewards, label="Mean Reward", linewidth=2)
+        ax.fill_between(timesteps, mean_rewards - std_rewards, mean_rewards + std_rewards, alpha=0.3, label="+-1 Std Dev")
+        
+        ax.set_title(f"Mean Reward per Timestep (N={len(all_rewards)} trajectories)", fontsize=FS_TITLE, fontweight='bold')
+        ax.set_xlabel("Timestep", fontsize=FS_LABEL)
+        ax.set_ylabel("Reward", fontsize=FS_LABEL)
+        ax.grid(True, alpha=0.3)
+        ax.legend(fontsize=FS_LEGEND)
+        plt.tight_layout()
+        plt.savefig(os.path.join(out_dir, "_avg_reward.png"), bbox_inches='tight', dpi=300)
+        plt.close()
+
+    print(f"Saved reward curve plots to: {out_dir}")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Inspect H5 file structure and optionally create visualizations/videos")
     parser.add_argument("filepath", type=str, help="Path to H5 file")
     parser.add_argument("--vis", action="store_true", help="Save per-trajectory videos")
-    parser.add_argument("--traj", action="store_true", help="Create trajectory plot images")
+    parser.add_argument("--sample_traj", action="store_true", help="Create trajectory plot images")
     parser.add_argument("--stats", action="store_true", help="Create txt file with dataset stats")
+    parser.add_argument("--rewards", action="store_true", help="Plot reward curves for all demos")
     parser.add_argument("--output_path", type=str, default="out", help="Output directory for visualizations and stats")
     parser.add_argument("--subgoals", type=str, default=None, help="Path to subgoal_frame.json (optional, if not specified, same folder as h5 file will be checked)")
     args = parser.parse_args()
 
     if not os.path.exists(args.output_path):
         os.makedirs(args.output_path, exist_ok=True)
+
+    if args.subgoals is None:
+        # check if in same folder as h5 file
+        dir_name = os.path.dirname(args.filepath)
+        expected_path = os.path.join(dir_name, "subgoal_frames.json")
+        if os.path.exists(expected_path):
+            subgoals_path = expected_path
+    else:
+        subgoals_path = args.subgoals
+
+    if subgoals_path is not None:
+        with open(subgoals_path, 'r') as f:
+            subgoals_data = json.load(f)
+        print(f"Loaded subgoal frame data from: {subgoals_path}")
+    else:
+        print("No subgoal frame data found: not specified nor found in same folder as h5 file")
 
     with h5py.File(args.filepath, 'r') as f:
         print(f"H5 File: {args.filepath}")
@@ -298,22 +376,26 @@ if __name__ == "__main__":
 
         # save videos if requested
         if args.vis:
-            _save_demo_videos(f, demo_names, output_dir=args.output_path, subgoals_path=args.subgoals)
+            _save_demo_videos(f, demo_names, output_dir=args.output_path, subgoals_data=subgoals_data)
 
         # create output path for plots and stats
-        base_name = os.path.basename(args.filepath).replace(".h5", "")
-        out_path = os.path.join(args.output_path, f"{base_name}_visualizations")
+        dir_name = os.path.dirname(args.filepath).split("/")[-1]
+        out_path = os.path.join(args.output_path, f"{dir_name}_visualizations")
         os.makedirs(out_path, exist_ok=True)
         print(f"Output path for visualizations and stats: {out_path}")
 
         # plot trajectory statistics if requested
-        if args.traj:
-            plots_dir = os.path.join(out_path, "plots")
+        if args.sample_traj:
+            plots_dir = os.path.join(out_path, "sample_plots")
             os.makedirs(plots_dir, exist_ok=True)
             # plot for first demo only (preserve prior behavior)
-            if len(demo_names) > 0:
-                _plot_trajectory_stats(f[demo_names[0]], output_dir=plots_dir)
+            _plot_trajectory_stats(f[demo_names[0]], output_dir=plots_dir)
 
         # write dataset stats if requested
         if args.stats:
             _write_dataset_mse_stats(h5_file=f, output_dir=out_path)
+
+        # plot reward curves for all demos
+        if args.rewards:
+            _plot_reward_curves(f, demo_names, subgoals_data=subgoals_data, output_dir=out_path)
+

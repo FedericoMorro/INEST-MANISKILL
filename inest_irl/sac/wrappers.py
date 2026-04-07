@@ -128,7 +128,7 @@ class FrameStack(gym.Wrapper):
     numpy_frames = []
     for frame in self._frames:
         # Use the same flatten_observation function that handles nested structures
-        from utils import flatten_observation
+        from inest_irl.utils.utils import flatten_observation
         flattened_frame = flatten_observation(frame)
         numpy_frames.append(flattened_frame)
     return np.concatenate(numpy_frames, axis=0)
@@ -295,6 +295,55 @@ class VideoRecorder(gym.Wrapper):
       self.frames = []
       self.current_episode += 1
     return observation, reward, done, info
+
+
+class EnvironmentRewardBaselineWrapper(gym.Wrapper):
+    """Compatibility wrapper that keeps raw environment rewards.
+
+    This wrapper preserves the step signature used by learned reward wrappers so
+    training/evaluation code can stay unchanged across reward modes.
+    """
+
+    def __init__(self, env):
+        super().__init__(env)
+        self.index_seed_step = 0
+
+    def step(self, action, rank=None, exp_dir=None, flag="train"):
+        del rank, exp_dir, flag  # Interface compatibility with learned wrappers.
+        result = self.env.step(action)
+        if len(result) == 5:
+            obs, reward, terminated, truncated, info = result
+            done = terminated or truncated
+        else:
+            obs, reward, done, info = result
+
+        info = dict(info)
+        info.setdefault("env_reward", reward)
+        if "eval_score" not in info and "success" in info:
+            info["eval_score"] = info["success"]
+        return obs, reward, done, info
+
+    def reset_state(self):
+        """No-op for compatibility with wrappers that keep internal state."""
+        return
+
+    def get_coverage_stats(self):
+        """Return empty coverage stats for interface compatibility."""
+        return {}
+
+    def get_coverage_visualization_data(self):
+        """Return no visualization data for interface compatibility."""
+        return None
+
+    def save_coverage_data(self, filepath):
+        """Persist an empty payload to match learned-wrapper API."""
+        payload = {
+                "mode": "environment_reward_baseline",
+                "message": "No learned-reward coverage data available.",
+        }
+        with open(filepath, "w") as f:
+            import json
+            json.dump(payload, f, indent=2)
 
 
 # ========================================= #
