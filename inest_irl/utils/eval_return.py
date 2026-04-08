@@ -37,13 +37,13 @@ FS_LEGEND = 10
 FS_TRAJ_TITLE = 12
 
 
-def _setup(experiment_path):
+def _setup(experiment_path, use_cpu):
   """Load the latest embedder checkpoint and dataloaders"""
 
   config = load_config_from_dir(experiment_path)
   model = common.get_model(config)
   
-  device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+  device = torch.device("cuda" if torch.cuda.is_available() and not use_cpu else "cpu")
   model.to(device).eval()
   
   # try to load checkpoint
@@ -58,9 +58,9 @@ def _setup(experiment_path):
   else:
     print("Skipping checkpoint restore (not found or disabled).")
   
-  # load data
-  train_loader = common.get_downstream_dataloaders(config, False)["train"]
-  valid_loader = common.get_downstream_dataloaders(config, False)["valid"]
+  # load data -> debug active if use_cpu, otherwise use GPU-optimized dataloader settings
+  train_loader = common.get_downstream_dataloaders(config, debug=use_cpu)["train"]
+  valid_loader = common.get_downstream_dataloaders(config, debug=use_cpu)["valid"]
   #! note batch_size=1 is enforced in the dataloader
 
   # search for subgoal_frames.json to plot also subgoal rewards
@@ -189,15 +189,15 @@ def _sanitize_plot_type(label):
   normalized = normalized.replace('distance', 'dist')
   normalized = normalized.replace('subgoal', 'sub')
   normalized = normalized.replace('reward', 'rew')
+  normalized = normalized.replace('negative', 'neg')
+  normalized = normalized.replace('trajectory', 'traj')
+  normalized = normalized.replace('(', '').replace(')', '')
   normalized = "_".join(normalized.split())
   return normalized.strip('_')
 
 
-def plot_trajectory_samples(rewards, traj_ids, output_dir, exp_name, subgoal_reachs, label="Learned Reward", count=None):
+def plot_trajectory_samples(rewards, traj_ids, output_dir, subgoal_reachs, label="Learned Reward", count=None):
   """Save one plot per trajectory in the eval set (optionally capped by count)."""
-  os.makedirs(output_dir, exist_ok=True)
-  traj_out_dir = os.path.join(output_dir, "trajs")
-  os.makedirs(traj_out_dir, exist_ok=True)
   plot_type = _sanitize_plot_type(label)
 
   num_trajs = min(len(rewards), len(traj_ids))
@@ -227,12 +227,12 @@ def plot_trajectory_samples(rewards, traj_ids, output_dir, exp_name, subgoal_rea
     ax.legend(fontsize=FS_LEGEND)
 
     plt.tight_layout()
-    output_path = os.path.join(traj_out_dir, f'{traj_id}_{plot_type}.png')
+    output_path = os.path.join(output_dir, f'{traj_id}_{plot_type}.png')
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
     plt.close()
 
 
-def plot_results(rewards, output_dir, exp_name, subgoal_reachs, label="Learned Reward"):
+def plot_results(rewards, output_dir, subgoal_reachs, label="Learned Reward"):
   """Plot mean reward per timestep and return padded trajectories info."""
   os.makedirs(output_dir, exist_ok=True)
   
@@ -278,7 +278,7 @@ def plot_results(rewards, output_dir, exp_name, subgoal_reachs, label="Learned R
   return padded_rewards, lengths, mean_reward
 
 
-def plot_trajectory_lengths(lengths, output_dir, exp_name):
+def plot_trajectory_lengths(lengths, output_dir):
   """Plot trajectory length histogram once per evaluation run."""
   print("Plotting trajectory lengths...")
   fig, ax = plt.subplots(1, 1, figsize=FIGSIZE_HIST)
@@ -293,6 +293,57 @@ def plot_trajectory_lengths(lengths, output_dir, exp_name):
   plt.close()
 
 
+def compute_rewards_from_videos(model, videos_folder, goal_emb, dist_scale, device):
+  """Compute reward signal for given videos given the goal embedding."""
+
+  def load_video_frames(video_path):
+    import cv2
+    cap = cv2.VideoCapture(video_path)
+    frames = []
+    while True:
+      ret, frame = cap.read()
+      if not ret:
+        break
+      frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+      # resize to 128x128 if needed
+      if frame_rgb.shape[:2] != (128, 128):
+        frame_rgb = cv2.resize(frame_rgb, (128, 128))
+      frames.append(frame_rgb)
+    cap.release()
+    frames_array = np.stack(frames, axis=0)  # shape: (seq_len, H, W, C)
+    frames_array = np.transpose(frames_array, (0, 3, 1, 2))  # shape: (seq_len, C, H, W)
+    frames_tensor = torch.from_numpy(frames_array).float().unsqueeze(0)  # shape: (1, seq_len, C, H, W)
+    
+    # save frames as png files (for comparison with dataset)
+    video_name = Path(video_path).stem
+    frames_dir = Path(videos_folder) / video_name
+    frames_dir.mkdir(exist_ok=True)
+    for i, frame in enumerate(frames):
+      frame_path = frames_dir / f"{i:d}.png"
+      cv2.imwrite(str(frame_path), cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
+    
+    return frames_tensor
+
+  rewards, traj_ids = [], []
+
+  video_files = [f for f in os.listdir(videos_folder) if f.endswith('.mp4')]
+  for video_file in tqdm(video_files, desc="Computing rewards from videos"):
+    traj_id = video_file.split('.')[0]
+    traj_ids.append(traj_id)
+
+    video_path = os.path.join(videos_folder, video_file)
+    frames = load_video_frames(video_path)
+
+    with torch.no_grad():
+      out = model.infer(frames.to(device))
+      traj_emb = out.numpy().embs  # shape: (seq_len, embedding_dim)
+      
+      dist = np.linalg.norm(goal_emb - traj_emb, axis=1)**2  # shape: (seq_len,)
+      rewards.append(- dist * dist_scale)
+
+  return rewards, traj_ids
+
+
 def main(args):
   # set random seeds for reproducibility
   torch.manual_seed(22)
@@ -305,9 +356,12 @@ def main(args):
   out_dir = os.path.join(args.output_dir, exp_name)
   os.makedirs(out_dir, exist_ok=True)
 
+  trajs_out_dir = os.path.join(out_dir, "trajs")
+  os.makedirs(trajs_out_dir, exist_ok=True)
+
   # setup model and data
   print(f"Loading model from: {args.experiment_path}")
-  model, train_loader, valid_loader, subgoal_frames, device = _setup(args.experiment_path)
+  model, train_loader, valid_loader, subgoal_frames, device = _setup(args.experiment_path, args.use_cpu)
 
   # check for cached results in output directory
   cache_path = os.path.join(out_dir, 'rew_cache.pkl')
@@ -334,27 +388,30 @@ def main(args):
       print(f"Subgoals identified: {len(subgoal_embs)} - shape: {subgoal_embs[0].shape}")
   
   # compute reward signals
-  (rewards, traj_ids, subgoal_rewards, subgoal_dists, subgoal_reachs
-  ) = compute_reward_signals(model, valid_loader, goal_emb, subgoal_embs, dist_scale, device)
-  print(f"Computed {len(rewards)} reward signals")
+  if not args.no_plot_trajs or not args.no_plot_subgoal_trajs:
+    (rewards, traj_ids, subgoal_rewards, subgoal_dists, subgoal_reachs
+    ) = compute_reward_signals(model, valid_loader, goal_emb, subgoal_embs, dist_scale, device)
+    print(f"Computed {len(rewards)} reward signals")
 
-  # plot trajectory lengths once using base rewards, to understand distribution of trajectory lengths and mean-std plots better
-  _, lengths = pad_trajectories(rewards)
-  plot_trajectory_lengths(lengths, out_dir, exp_name)
 
-  # save one trajectory plot per eval sample (or up to count)
-  plot_trajectory_samples(rewards, traj_ids, out_dir, exp_name, None, label="Learned Reward", count=args.count)
+  if not args.no_plot_trajs:
+    # plot trajectory lengths once using base rewards, to understand distribution of trajectory lengths and mean-std plots better
+    _, lengths = pad_trajectories(rewards)
+    plot_trajectory_lengths(lengths, out_dir)
+
+    # save one trajectory plot per eval sample (or up to count)
+    plot_trajectory_samples(rewards, traj_ids, trajs_out_dir, None, label="Learned Reward", count=args.count)
   
-  # plot results
-  plot_results(rewards, out_dir, exp_name, None, label="Learned Reward")
+    # plot results
+    plot_results(rewards, out_dir, None, label="Learned Reward")
 
-  if subgoal_rewards is not None:
-    plot_trajectory_samples(subgoal_rewards, traj_ids, out_dir, exp_name, subgoal_reachs, label="Learned Subgoal Reward", count=args.count)
-    plot_results(subgoal_rewards, out_dir, exp_name, subgoal_reachs, label="Learned Subgoal Reward")
+  if not args.no_plot_subgoal_trajs and subgoal_rewards is not None:
+    plot_trajectory_samples(subgoal_rewards, traj_ids, trajs_out_dir, subgoal_reachs, label="Learned Subgoal Reward", count=args.count)
+    plot_results(subgoal_rewards, out_dir, subgoal_reachs, label="Learned Subgoal Reward")
 
     for i, subgoal_dist in enumerate(subgoal_dists):
-      plot_trajectory_samples(subgoal_dist, traj_ids, out_dir, exp_name, subgoal_reachs, label=f"Distance to Subgoal {i+1}", count=args.count)
-      plot_results(subgoal_dist, out_dir, exp_name, subgoal_reachs, label=f"Distance to Subgoal {i+1}")
+      plot_trajectory_samples(subgoal_dist, traj_ids, trajs_out_dir, subgoal_reachs, label=f"Distance to Subgoal {i+1}", count=args.count)
+      plot_results(subgoal_dist, out_dir, subgoal_reachs, label=f"Distance to Subgoal {i+1}")
 
     # save .txt with per trajectory subgoal reaching timesteps
     traj_substep = []
@@ -370,7 +427,14 @@ def main(args):
       for i, ts in enumerate(traj_substep):
         f.write(f"{i:>4.0f}: " + ", ".join([f"{t:3.0f}" for t in ts]) + "\n")
 
-          
+  # negative trajectory sanity check plots if provided
+  if args.neg_trajs_path is not None:
+    neg_out_dir = os.path.join(out_dir, "neg_trajs")
+    os.makedirs(neg_out_dir, exist_ok=True)
+
+    neg_rewards, neg_traj_ids = compute_rewards_from_videos(model, args.neg_trajs_path, goal_emb, dist_scale, device)
+
+    plot_trajectory_samples(neg_rewards, neg_traj_ids, neg_out_dir, None, label="Learned Reward")
 
   print(f"All results saved to: {out_dir}")
 
@@ -383,6 +447,14 @@ if __name__ == "__main__":
                           help="Directory to save the generated plots")
   arg_parser.add_argument("--count", type=int, default=-1,
                           help="Maximum number of trajectory-wise plots to save per plot type (-1 plots all trajectories)")
+  arg_parser.add_argument("--use_cpu", action='store_true', default=False,
+                          help="Whether to force CPU usage even if GPU is available (if GPU not idle to avoid 'RuntimeError: CUDA out of memory')")
+  arg_parser.add_argument("--no_plot_trajs", action='store_true', default=False,
+                          help="Whether to save plots for learned rewards")
+  arg_parser.add_argument("--no_plot_subgoal_trajs", action='store_true', default=False,
+                          help="Whether to save plots for subgoal rewards and distances")
+  arg_parser.add_argument("--neg_trajs_path", type=str, default=None,
+                          help="Optional path to a folder with .mp4 videos of negative trajectories to check reward signal sanity")
   args = arg_parser.parse_args()
 
   main(args)
