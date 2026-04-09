@@ -437,12 +437,31 @@ def make_vector_env(
   Returns:
     gym.vector.SyncVectorEnv object.
   """
-  from gym.vector import SyncVectorEnv
+  # Use Gymnasium vector API since make_env returns Gymnasium envs/spaces.
+  from gymnasium.vector import SyncVectorEnv
+
+  class _VectorAPICompatibilityWrapper(gym.Wrapper):
+    """Normalizes reset/step outputs to Gymnasium's vector API contract."""
+
+    def reset(self, *, seed=None, options=None):
+      out = self.env.reset(seed=seed, options=options)
+      if isinstance(out, tuple) and len(out) == 2:
+        return out
+      return out, {}
+
+    def step(self, action):
+      out = self.env.step(action)
+      if isinstance(out, tuple) and len(out) == 5:
+        return out
+      if isinstance(out, tuple) and len(out) == 4:
+        obs, reward, done, info = out
+        return obs, reward, done, False, info
+      raise ValueError(f"Unexpected step() output format: {type(out)}")
   
   def _make_env(rank):
     def _init():
       env_seed = seed_start + rank
-      return make_env(
+      env = make_env(
           env_name=env_name,
           seed=env_seed,
           save_dir=save_dir if rank == 0 else None,  # Only first env saves videos
@@ -450,6 +469,7 @@ def make_vector_env(
           action_repeat=action_repeat,
           frame_stack=frame_stack,
       )
+      return _VectorAPICompatibilityWrapper(env)
     return _init
   
   # Create vector environment
@@ -496,6 +516,9 @@ def wrap_learned_reward_single(env, config, device, model, model_config):
     "device": device,
     "res_hw": model_config.data_augmentation.image_size,
   }
+
+  if config.reward_wrapper.type == "env":
+    return wrappers.EnvironmentRewardBaselineWrapper(env)
   
   if config.reward_wrapper.type == "goal_classifier":
     from sac.wrappers import GoalClassifierLearnedVisualReward
@@ -542,11 +565,14 @@ def make_vect_buffer(env, device, config):
       action_shape = env.action_space.shape
       obs_shape = env.observation_space.shape
 
+    obs_shape = (obs_shape[0] * config.frame_stack,)
+
     kwargs = {
         "obs_shape": obs_shape,
         "action_shape": action_shape,
         "capacity": config.replay_buffer_capacity,
         "device": device,
+        "next_obs_shape": obs_shape,  # assuming next_obs has same shape as obs
     }
 
     # Use standard replay buffer

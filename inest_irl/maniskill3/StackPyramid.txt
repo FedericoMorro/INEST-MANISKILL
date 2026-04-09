@@ -1,0 +1,35 @@
+**STATE SPACE**
+
+state_dict top keys: ['agent', 'extra']
+
+Leaf entries (path | shape | numel_without_batch | type):
+- agent.qpos                                    | (1, 9)               |   9 | Tensor
+- agent.qvel                                    | (1, 9)               |   9 | Tensor
+- extra.cubeA_pose                              | (1, 7)               |   7 | Tensor
+- extra.cubeA_to_cubeB_pos                      | (1, 3)               |   3 | Tensor
+- extra.cubeA_to_cubeC_pos                      | (1, 3)               |   3 | Tensor
+- extra.cubeB_pose                              | (1, 7)               |   7 | Tensor
+- extra.cubeB_to_cubeC_pos                      | (1, 3)               |   3 | Tensor
+- extra.cubeC_pose                              | (1, 7)               |   7 | Tensor
+- extra.is_cubeA_grasped                        | (1,)                 |   1 | Tensor
+- extra.is_cubeB_grasped                        | (1,)                 |   1 | Tensor
+- extra.is_cubeC_grasped                        | (1,)                 |   1 | Tensor
+- extra.is_cubeC_static                         | (1,)                 |   1 | Tensor
+- extra.tcp_pose                                | (1, 7)               |   7 | Tensor
+- extra.tcp_to_cubeA_pos                        | (1, 3)               |   3 | Tensor
+- extra.tcp_to_cubeB_pos                        | (1, 3)               |   3 | Tensor
+- extra.tcp_to_cubeC_pos                        | (1, 3)               |   3 | Tensor
+
+Total state_dict numel_without_batch: 68
+
+During training, a FrameStack wrapper can be used to stack the last k frames of observations, and consequently
+increase the temporal context available to the policy. This increases the state dimension by a factor k,
+e.g. for k=3, the state dimension becomes 68*3=204.
+
+
+
+**ACTION SPACE**
+
+To be set in ../utils/utils.py:make_env()
+- pd_ee_delta_pos: 4D -> dx, dy, dz, grasp
+- pd_ee_delta_pose: 7D -> dx, dy, dz, grasp, droll, dpitch, dyaw

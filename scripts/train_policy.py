@@ -267,8 +267,11 @@ def evaluate(policy, env, num_episodes):
                 observation, reward, done, info = result
 
             observation = flatten_observation(observation)
-            if isinstance(reward, torch.Tensor):  ### FIX
-                reward = reward.detach().cpu().item()
+            reward_scalar = _to_scalar(reward)
+            if reward_scalar is None:
+                logging.warning("Skipping non-scalar eval reward at episode %d step %d", i, count)
+                reward_scalar = 0.0
+            reward = reward_scalar
             episode_reward += reward
 
             if i == num_episodes - 1:
@@ -313,17 +316,26 @@ def evaluate(policy, env, num_episodes):
 
             try:
                 import matplotlib.pyplot as plt
-                plt.figure(figsize=(10, 6))
-                plt.plot(last_episode_rewards)
-                plt.title("Reward Evolution - Last Evaluation Episode")
-                plt.xlabel("Step")
-                plt.ylabel("Reward")
-                plt.tight_layout()
-                wandb.log({
-                    "eval/last_reward_plot": wandb.Image(plt),
-                    "eval/step": i
-                })
-                plt.close()
+
+                # Only plot finite scalar rewards to avoid matplotlib cast errors.
+                reward_series = []
+                for r in last_episode_rewards:
+                    r_scalar = _to_scalar(r)
+                    if r_scalar is not None and np.isfinite(r_scalar):
+                        reward_series.append(r_scalar)
+
+                if reward_series:
+                    plt.figure(figsize=(10, 6))
+                    plt.plot(reward_series)
+                    plt.title("Reward Evolution - Last Evaluation Episode")
+                    plt.xlabel("Step")
+                    plt.ylabel("Reward")
+                    plt.tight_layout()
+                    wandb.log({
+                        "eval/last_reward_plot": wandb.Image(plt),
+                        "eval/step": i
+                    })
+                    plt.close()
             except ImportError:
                 pass
 
@@ -340,9 +352,15 @@ def evaluate(policy, env, num_episodes):
         print(f"Mean Evaluation Score over {num_episodes} episodes: {aggregated_stats['eval_score']}", flush=True)
 
     if FLAGS.wandb:
+        wandb_episode_rewards = []
+        for r in episode_rewards:
+            r_scalar = _to_scalar(r)
+            if r_scalar is not None and np.isfinite(r_scalar):
+                wandb_episode_rewards.append(r_scalar)
+
         wandb.log({
-            "eval/mean_episode_reward": safe_mean(episode_rewards),
-            "eval/episode_rewards": [float(r) for r in episode_rewards],
+            "eval/mean_episode_reward": safe_mean(wandb_episode_rewards),
+            "eval/episode_rewards": wandb_episode_rewards,
             "eval/step": i,
         })
         if "eval_score" in aggregated_stats:

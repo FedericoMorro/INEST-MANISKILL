@@ -36,6 +36,13 @@ TensorType = torch.Tensor
 DistanceFuncType = typing.Callable[[float], float]
 InfoMetric = typing.Mapping[str, typing.Mapping[str, typing.Any]]
 
+
+def _merge_done(terminated, truncated):
+    """Merge done flags for both scalar and vectorized env outputs."""
+    if isinstance(terminated, (np.ndarray, list, tuple, torch.Tensor)):
+        return np.logical_or(np.asarray(terminated), np.asarray(truncated))
+    return bool(terminated or truncated)
+
 def frame_correction(frame):
     import torch
     import numpy as np
@@ -88,50 +95,77 @@ class FrameStack(gym.Wrapper):
     self._frames = collections.deque([], maxlen=k)
 
     shp = env.observation_space.shape
+    flat_dim = int(np.prod(shp)) * k
     self.observation_space = gym.spaces.Box(
-        low=env.observation_space.low.min(),
-        high=env.observation_space.high.max(),
-        shape=((shp[0] * k,) + shp[1:]),
-        dtype=env.observation_space.dtype,
+      low=env.observation_space.low.min(),
+      high=env.observation_space.high.max(),
+      shape=(flat_dim,),
+      dtype=np.float32,
     )
 
   def reset(self, *, seed=None, options=None):
     """Reset the environment and stack the initial observation."""
     # Set the seed if provided
     if seed is not None:
-        if hasattr(self.env, 'set_seed'):
-            self.env.set_seed(seed)
-        else:
-            print("Warning: Environment does not support seeding.")
+      if hasattr(self.env, 'set_seed'):
+        self.env.set_seed(seed)
+      else:
+        print("Warning: Environment does not support seeding.")
 
-    # Call the underlying environment's reset method
+    # Gymnasium reset can return (obs, info): keep only obs for stacking.
     obs = self.env.reset()
+    if isinstance(obs, tuple):
+      obs = obs[0]
 
     # Stack the initial observation
     for _ in range(self._k):
-        self._frames.append(obs)
+      self._frames.append(obs)
     return self._get_obs()
 
   def step(self, action):
     result = self.env.step(action)
     if len(result) == 5:
-        obs, reward, done, truncated, info = result
-        done = done or truncated
+      obs, reward, done, truncated, info = result
+      done = done or truncated
     else:
-        obs, reward, done, info = result
+      obs, reward, done, info = result
     self._frames.append(obs)
     return self._get_obs(), reward, done, info
 
   def _get_obs(self):
     assert len(self._frames) == self._k
-    # Convert frames to numpy arrays if they are torch tensors
-    numpy_frames = []
+
+    # Local flatten avoids relying on external flattening behavior for np.ndarray.
+    def _to_flat_list(item):
+      if isinstance(item, tuple):
+        item = item[0]
+      if isinstance(item, torch.Tensor):
+        item = item.detach().cpu().numpy()
+      if isinstance(item, np.ndarray):
+        if item.dtype == np.object_:
+          out = []
+          for sub in item.flat:
+            out.extend(_to_flat_list(sub))
+          return out
+        return np.nan_to_num(item.astype(np.float32).ravel(), nan=0.0, posinf=0.0, neginf=0.0).tolist()
+      if isinstance(item, dict):
+        out = []
+        for v in item.values():
+          out.extend(_to_flat_list(v))
+        return out
+      if isinstance(item, (list, tuple)):
+        out = []
+        for v in item:
+          out.extend(_to_flat_list(v))
+        return out
+      if isinstance(item, (int, float, bool, np.number)):
+        return [float(item)]
+      return []
+
+    stacked = []
     for frame in self._frames:
-        # Use the same flatten_observation function that handles nested structures
-        from inest_irl.utils.utils import flatten_observation
-        flattened_frame = flatten_observation(frame)
-        numpy_frames.append(flattened_frame)
-    return np.concatenate(numpy_frames, axis=0)
+      stacked.extend(_to_flat_list(frame))
+    return np.asarray(stacked, dtype=np.float32)
 
 
 class ActionRepeat(gym.Wrapper):
@@ -313,7 +347,7 @@ class EnvironmentRewardBaselineWrapper(gym.Wrapper):
         result = self.env.step(action)
         if len(result) == 5:
             obs, reward, terminated, truncated, info = result
-            done = terminated or truncated
+            done = _merge_done(terminated, truncated)
         else:
             obs, reward, done, info = result
 
@@ -451,10 +485,10 @@ class LearnedVisualReward(abc.ABC, gym.Wrapper):
   def step(self, action):
     result = self.env.step(action)
     if len(result) == 5:
-          obs, env_reward, terminated, truncated, info = result
-          done = terminated or truncated
+            obs, env_reward, terminated, truncated, info = result
+            done = _merge_done(terminated, truncated)
     else:
-          obs, env_reward, done, info = result
+            obs, env_reward, done, info = result
     # We'll keep the original env reward in the info dict in case the user would
     # like to use it in conjunction with the learned reward.
     info["env_reward"] = env_reward
@@ -949,7 +983,7 @@ class INESTIRLLearnedVisualReward(LearnedVisualReward):
             self._subtask_solved_counter = 0
             
       elif self._subtask == 3:
-        if dist > -0.03:
+        if dist > 0.5:
             self._subtask_solved_counter += 1
             if self._subtask_solved_counter >= self._subtask_hold_steps:
                 self._subtask = self._subtask + 1
@@ -958,7 +992,7 @@ class INESTIRLLearnedVisualReward(LearnedVisualReward):
         else:
             self._subtask_solved_counter = 0
       elif self._subtask == 4:
-        if dist > -0.03:
+        if dist > 0.5:
             self._subtask_solved_counter += 1
             if self._subtask_solved_counter >= self._subtask_hold_steps:
                 self._subtask = self._subtask + 1
@@ -967,7 +1001,7 @@ class INESTIRLLearnedVisualReward(LearnedVisualReward):
         else:
             self._subtask_solved_counter = 0
       elif self._subtask == 5:
-        if dist > -0.06:
+        if dist > 0.5:
             self._subtask_solved_counter += 1
             if self._subtask_solved_counter >= self._subtask_hold_steps:
                 self._subtask = self._subtask + 1
@@ -1467,11 +1501,11 @@ class KNNINESTIRLLearnedVisualReward(LearnedVisualReward):
         return dist
     
     def _distance_reward(self, d, alpha=0.001, beta=0.01, gamma=1e-3):
-      return -alpha * d**2 - beta * np.sqrt(d**2 + gamma)
+      return 1.0 / (1.0 + beta * d)  # Hyperbolic decay: 1.0 at d=0 → 0 as d→∞
     
     def _check_subtask_completion(self, dist, current_reward):
       if self._subtask == 0:
-        if dist > -0.03:
+        if dist > 0.5:
             self._subtask_solved_counter += 1
             if self._subtask_solved_counter >= self._subtask_hold_steps:
                 self._subtask = self._subtask + 1
@@ -1480,7 +1514,7 @@ class KNNINESTIRLLearnedVisualReward(LearnedVisualReward):
         else:
             self._subtask_solved_counter = 0
       elif self._subtask == 1:
-        if dist > -0.03:
+        if dist > 0.5:
             self._subtask_solved_counter += 1
             if self._subtask_solved_counter >= self._subtask_hold_steps:
                 self._subtask = self._subtask + 1
@@ -1489,7 +1523,7 @@ class KNNINESTIRLLearnedVisualReward(LearnedVisualReward):
         else:
             self._subtask_solved_counter = 0
       elif self._subtask == 2:
-        if dist > -0.06:
+        if dist > 0.5:
             self._subtask_solved_counter += 1
             if self._subtask_solved_counter >= self._subtask_hold_steps:
                 self._subtask = self._subtask + 1
@@ -1499,7 +1533,7 @@ class KNNINESTIRLLearnedVisualReward(LearnedVisualReward):
             self._subtask_solved_counter = 0
             
       elif self._subtask == 3:
-        if dist > -0.03:
+        if dist > 0.5:
             self._subtask_solved_counter += 1
             if self._subtask_solved_counter >= self._subtask_hold_steps:
                 self._subtask = self._subtask + 1
@@ -1508,7 +1542,7 @@ class KNNINESTIRLLearnedVisualReward(LearnedVisualReward):
         else:
             self._subtask_solved_counter = 0
       elif self._subtask == 4:
-        if dist > -0.03:
+        if dist > 0.5:
             self._subtask_solved_counter += 1
             if self._subtask_solved_counter >= self._subtask_hold_steps:
                 self._subtask = self._subtask + 1
@@ -1517,7 +1551,7 @@ class KNNINESTIRLLearnedVisualReward(LearnedVisualReward):
         else:
             self._subtask_solved_counter = 0
       elif self._subtask == 5:
-        if dist > -0.06:
+        if dist > 0.5:
             self._subtask_solved_counter += 1
             if self._subtask_solved_counter >= self._subtask_hold_steps:
                 self._subtask = self._subtask + 1
@@ -2065,11 +2099,11 @@ class STATEINTRINSICLearnedVisualReward(LearnedVisualReward):
         return dist
     
     def _distance_reward(self, d, alpha=0.001, beta=0.01, gamma=1e-3):
-      return -alpha * d**2 - beta * np.sqrt(d**2 + gamma)
+      return 1.0 / (1.0 + beta * d)  # Hyperbolic decay: 1.0 at d=0 → 0 as d→∞
     
     def _check_subtask_completion(self, dist, current_reward):
       if self._subtask == 0:
-        if dist > -0.03:
+        if dist > 0.5:
             self._subtask_solved_counter += 1
             if self._subtask_solved_counter >= self._subtask_hold_steps:
                 self._subtask = self._subtask + 1
@@ -2078,7 +2112,7 @@ class STATEINTRINSICLearnedVisualReward(LearnedVisualReward):
         else:
             self._subtask_solved_counter = 0
       elif self._subtask == 1:
-        if dist > -0.03:
+        if dist > 0.5:
             self._subtask_solved_counter += 1
             if self._subtask_solved_counter >= self._subtask_hold_steps:
                 self._subtask = self._subtask + 1
@@ -2087,7 +2121,7 @@ class STATEINTRINSICLearnedVisualReward(LearnedVisualReward):
         else:
             self._subtask_solved_counter = 0
       elif self._subtask == 2:
-        if dist > -0.06:
+        if dist > 0.5:
             self._subtask_solved_counter += 1
             if self._subtask_solved_counter >= self._subtask_hold_steps:
                 self._subtask = self._subtask + 1
@@ -2097,7 +2131,7 @@ class STATEINTRINSICLearnedVisualReward(LearnedVisualReward):
             self._subtask_solved_counter = 0
             
       elif self._subtask == 3:
-        if dist > -0.03:
+        if dist > 0.5:
             self._subtask_solved_counter += 1
             if self._subtask_solved_counter >= self._subtask_hold_steps:
                 self._subtask = self._subtask + 1
@@ -2106,7 +2140,7 @@ class STATEINTRINSICLearnedVisualReward(LearnedVisualReward):
         else:
             self._subtask_solved_counter = 0
       elif self._subtask == 4:
-        if dist > -0.04:
+        if dist > 0.5:
             self._subtask_solved_counter += 1
             if self._subtask_solved_counter >= self._subtask_hold_steps:
                 self._subtask = self._subtask + 1
@@ -2115,7 +2149,7 @@ class STATEINTRINSICLearnedVisualReward(LearnedVisualReward):
         else:
             self._subtask_solved_counter = 0
       elif self._subtask == 5:
-        if dist > -0.06:
+        if dist > 0.5:
             self._subtask_solved_counter += 1
             if self._subtask_solved_counter >= self._subtask_hold_steps:
                 self._subtask = self._subtask + 1

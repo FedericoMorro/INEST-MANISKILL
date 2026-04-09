@@ -66,10 +66,10 @@ def get_config():
   # Training parameters.
   # ================================================= #
   config.num_train_steps = 30_000_000
-  config.replay_buffer_capacity = 1_000_000
-  config.num_seed_steps = 30_000
+  config.replay_buffer_capacity = 1_000_000 // config.num_envs_per_process
+  config.num_seed_steps = 20_000 // config.num_envs_per_process
   config.num_eval_episodes = 50 #150
-  config.eval_frequency = 50_000
+  config.eval_frequency = 20_000
   config.checkpoint_frequency = 300_000
   config.log_frequency = 1_000 #20_000
   config.save_video = True
