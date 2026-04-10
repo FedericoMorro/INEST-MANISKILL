@@ -305,7 +305,7 @@ class StackPyramidEnv(BaseEnv):
         else:
             reward = 1.0
         
-        return np.array(reward + 0.5)  # shift to [-0.5, 1.5], to encourage exploration in early stage and provide more reward range in later stage
+        return np.array(reward)
     
 
     def compute_normalized_dense_reward(
