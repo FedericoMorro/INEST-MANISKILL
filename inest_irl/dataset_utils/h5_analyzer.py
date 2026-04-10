@@ -1,3 +1,16 @@
+"""
+Example usage:
+
+python inest_irl/dataset_utils/h5_analyzer.py
+	../data/maniskill/StackPyramid-v1_.../trajectory...h5
+	[--vis]
+	[--sample_traj]
+	[--stats]
+	[--rewards]
+	[--output_path out]
+	[--subgoals path/to/subgoal/otherwise/search/data/folder]
+"""
+
 import argparse
 import h5py
 import json

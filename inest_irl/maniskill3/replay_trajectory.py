@@ -7,6 +7,36 @@ This is only supported for the StackPyramid environment using the CPU simulation
 """
 
 
+"""
+Example usage:
+
+- to replay trajs with RGB obses to build a dataset for vision-based pretraining
+
+python inest_irl/maniskill3/replay_trajectory.py
+    --traj-path ../.maniskill/demos/StackPyramid-v1/motionplanning/trajectory.h5
+    --save-traj
+    --obs-mode rgb
+    --output-path ../data/maniskill/StackPyramid-v1_.../
+    [--count 100]
+    [--num-envs 10]
+    [--cam-width 256]
+    [--cam-height 256]
+    [--subtask-json]
+
+- to replay trajs with state_dict obses and get environmental rewards for analysis
+
+python inest_irl/maniskill3/replay_trajectory.py
+    --traj-path ../.maniskill/demos/StackPyramid-v1/motionplanning/trajectory.h5
+    --save-traj
+    --obs-mode state_dict
+    --output-path ../data/maniskill/StackPyramid-v1_.../
+    --record-rewards
+    [--count 100]
+    [--num-envs 10]
+    [--subtask-json]
+"""
+
+
 """Replay ManiSkill trajectories stored in HDF5 (.h5) format
 
 The replayed trajectory can use different observation modes and control modes.

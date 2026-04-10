@@ -50,6 +50,14 @@ The structure of the dataset is as follows:
           traj-idx_element(s).json -> list of lists
 """
 
+"""
+Example usage:
+
+python inest_irl/dataset_utils/h5_to_dataset.py
+    --h5_path ../data/maniskill/StackPyramid-v1_data.../trajectory...h5
+    --dataset_path ../data/inest-maniskill/dataset...
+"""
+
 
 import argparse
 import h5py

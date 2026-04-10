@@ -339,7 +339,6 @@ def main(_):
         tensorboard_log=tb_log_dir,
         device=device,
         verbose=1,
-        seed=FLAGS.seed,
     )
 
     # Setup callbacks

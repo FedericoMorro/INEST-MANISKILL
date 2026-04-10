@@ -25,7 +25,7 @@ from mani_skill.utils.scene_builder.table import TableSceneBuilder
 from mani_skill.utils.structs.pose import Pose
 
 
-@register_env("StackPyramid-v1custom", max_episode_steps=250)
+@register_env("StackPyramid-v1custom", max_episode_steps=100)
 class StackPyramidEnv(BaseEnv):
     """
     **Task Description:**
@@ -50,7 +50,12 @@ class StackPyramidEnv(BaseEnv):
     agent: Union[Panda, Fetch]
 
     def __init__(
-        self, *args, robot_uids="panda_wristcam", robot_init_qpos_noise=0.02, randomize_cubes=True, **kwargs
+        self,
+        *args,
+        robot_uids="panda_wristcam",
+        robot_init_qpos_noise=0.02,
+        randomize_cubes=False,
+        **kwargs
     ):
         print("Initializing custom StackPyramid environment")
         self.robot_init_qpos_noise = robot_init_qpos_noise
@@ -294,13 +299,14 @@ class StackPyramidEnv(BaseEnv):
             distance_AC = torch.linalg.norm(offset_AC)
             distance_BC = torch.linalg.norm(offset_BC)
             z_flag = torch.abs(offset_BC[..., 2]) > 0.02
+            grasp_flag = self.agent.is_grasping(self.cubeC)
 
-            # in [0,1], equal contribution eef-C and cubes-C, with penalty for C height
+            # in [0,1], equal contribution eef-C, AB-to-C, grasp+height bonus
             reward = (
                 self._distance_to_reward(distance_eef_C) +
                 (self._distance_to_reward(distance_AC) + self._distance_to_reward(distance_BC)) / 2.0 +
-                - 0.5 * (1 - z_flag.float())
-            ) / 2.0
+                (z_flag.float() + grasp_flag.float()) / 2.0
+            ) / 3.0
 
         else:
             reward = 1.0
