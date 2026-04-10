@@ -4,8 +4,6 @@ datasets/
 # Ignore temporary and cache files
 /tmp/
 
-tests/
-
 videos.zip
 
 new_env_dataset.zip

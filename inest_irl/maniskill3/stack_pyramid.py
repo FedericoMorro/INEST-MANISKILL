@@ -50,10 +50,11 @@ class StackPyramidEnv(BaseEnv):
     agent: Union[Panda, Fetch]
 
     def __init__(
-        self, *args, robot_uids="panda_wristcam", robot_init_qpos_noise=0.02, **kwargs
+        self, *args, robot_uids="panda_wristcam", robot_init_qpos_noise=0.02, randomize_cubes=True, **kwargs
     ):
         print("Initializing custom StackPyramid environment")
         self.robot_init_qpos_noise = robot_init_qpos_noise
+        self.randomize_cubes = randomize_cubes
         kwargs["reward_mode"] = "normalized_dense"
         super().__init__(*args, robot_uids=robot_uids, **kwargs)
 
@@ -102,49 +103,65 @@ class StackPyramidEnv(BaseEnv):
             b = len(env_idx)
             self.table_scene.initialize(env_idx)
 
-            xyz = torch.zeros((b, 3), device=self.device)
-            xyz[:, 2] = 0.02
-            xy = xyz[:, :2]
-            region = [[-0.1, -0.2], [0.1, 0.2]]
-            sampler = randomization.UniformPlacementSampler(
-                bounds=region, batch_size=b, device=self.device
-            )
-            radius = torch.linalg.norm(torch.tensor([0.02, 0.02]))
-            cubeA_xy = xy + sampler.sample(radius, 100)
-            cubeB_xy = xy + sampler.sample(radius, 100, verbose=False)
-            cubeC_xy = xy + sampler.sample(radius, 100, verbose=False)
+            if self.randomize_cubes:
+                # Randomized positions and rotations
+                xyz = torch.zeros((b, 3), device=self.device)
+                xyz[:, 2] = 0.02
+                xy = xyz[:, :2]
+                region = [[-0.1, -0.2], [0.1, 0.2]]
+                sampler = randomization.UniformPlacementSampler(
+                    bounds=region, batch_size=b, device=self.device
+                )
+                radius = torch.linalg.norm(torch.tensor([0.02, 0.02]))
+                cubeA_xy = xy + sampler.sample(radius, 100)
+                cubeB_xy = xy + sampler.sample(radius, 100, verbose=False)
+                cubeC_xy = xy + sampler.sample(radius, 100, verbose=False)
 
-            # Cube A
-            xyz[:, :2] = cubeA_xy
+                # Cube A
+                xyz[:, :2] = cubeA_xy
+                qs = randomization.random_quaternions(
+                    b,
+                    lock_x=True,
+                    lock_y=True,
+                    lock_z=False,
+                )
+                self.cubeA.set_pose(Pose.create_from_pq(p=xyz.clone(), q=qs))
 
-            qs = randomization.random_quaternions(
-                b,
-                lock_x=True,
-                lock_y=True,
-                lock_z=False,
-            )
+                # Cube B
+                xyz[:, :2] = cubeB_xy
+                qs = randomization.random_quaternions(
+                    b,
+                    lock_x=True,
+                    lock_y=True,
+                    lock_z=False,
+                )
+                self.cubeB.set_pose(Pose.create_from_pq(p=xyz.clone(), q=qs))
 
-            self.cubeA.set_pose(Pose.create_from_pq(p=xyz.clone(), q=qs))
-
-            # Cube B
-            xyz[:, :2] = cubeB_xy
-            qs = randomization.random_quaternions(
-                b,
-                lock_x=True,
-                lock_y=True,
-                lock_z=False,
-            )
-            self.cubeB.set_pose(Pose.create_from_pq(p=xyz.clone(), q=qs))
-
-            # Cube C
-            xyz[:, :2] = cubeC_xy
-            qs = randomization.random_quaternions(
-                b,
-                lock_x=True,
-                lock_y=True,
-                lock_z=False,
-            )
-            self.cubeC.set_pose(Pose.create_from_pq(p=xyz, q=qs))
+                # Cube C
+                xyz[:, :2] = cubeC_xy
+                qs = randomization.random_quaternions(
+                    b,
+                    lock_x=True,
+                    lock_y=True,
+                    lock_z=False,
+                )
+                self.cubeC.set_pose(Pose.create_from_pq(p=xyz, q=qs))
+            else:
+                # Fixed positions without randomization
+                # Identity quaternion (no rotation)
+                identity_q = torch.tensor([1, 0, 0, 0], device=self.device).unsqueeze(0).repeat(b, 1)
+                
+                # Cube A - red, at origin on table
+                cubeA_pos = torch.tensor([[-0.08, 0.08, 0.04]], device=self.device).repeat(b, 1)
+                self.cubeA.set_pose(Pose.create_from_pq(p=cubeA_pos, q=identity_q))
+                
+                # Cube B - green, offset along x-axis
+                cubeB_pos = torch.tensor([[0.08, 0.00, 0.04]], device=self.device).repeat(b, 1)
+                self.cubeB.set_pose(Pose.create_from_pq(p=cubeB_pos, q=identity_q))
+                
+                # Cube C - blue, offset along negative x-axis
+                cubeC_pos = torch.tensor([[-0.08, -0.08, 0.04]], device=self.device).repeat(b, 1)
+                self.cubeC.set_pose(Pose.create_from_pq(p=cubeC_pos, q=identity_q))
 
     def evaluate(self):
         pos_A = self.cubeA.pose.p
@@ -288,7 +305,7 @@ class StackPyramidEnv(BaseEnv):
         else:
             reward = 1.0
         
-        return np.array(reward)
+        return np.array(reward + 0.5)  # shift to [-0.5, 1.5], to encourage exploration in early stage and provide more reward range in later stage
     
 
     def compute_normalized_dense_reward(
