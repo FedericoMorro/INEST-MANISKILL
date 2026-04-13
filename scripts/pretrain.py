@@ -198,27 +198,30 @@ def main(_):
                 "step": global_step,
                 "epoch": epoch,
             }, step=global_step)
-          wandb.log({
-            "evaluation loss": valid_loss["valid/total_loss"],
-            "step": global_step,
-            "epoch": epoch,
-          }, step=global_step)
-          if "reds" in FLAGS.experiment_name:
+
+          if not global_step % config.eval.eval_frequency:
             wandb.log({
-                "valid_reds/epic_loss": valid_loss["valid/epic_loss"],
-                "valid_reds/supcon_loss": valid_loss["valid/supcon_loss"],
-                "step": global_step,
-                "epoch": epoch,
+              "evaluation loss": valid_loss["valid/total_loss"],
+              "step": global_step,
+              "epoch": epoch,
             }, step=global_step)
-          if "holdr" in FLAGS.experiment_name:
-            wandb.log({
-                "valid_holdr/contrastive_loss": valid_loss["valid/contrastive_loss"],
-                "valid_holdr/holdr_loss": valid_loss["valid/holdr_loss"],
-                "valid_holdr/distance_frames_before_subtask_loss": valid_loss["valid/distance_frames_before_subtask_loss"],
-                "valid_holdr/distance_subtask_means_loss": valid_loss["valid/distance_subtask_means_loss"],
-                "step": global_step,
-                "epoch": epoch,
-            }, step=global_step)
+            if "reds" in FLAGS.experiment_name:
+              wandb.log({
+                  "valid_reds/epic_loss": valid_loss["valid/epic_loss"],
+                  "valid_reds/supcon_loss": valid_loss["valid/supcon_loss"],
+                  "step": global_step,
+                  "epoch": epoch,
+              }, step=global_step)
+            if "holdr" in FLAGS.experiment_name:
+              wandb.log({
+                  "valid_holdr/contrastive_loss": valid_loss["valid/contrastive_loss"],
+                  "valid_holdr/holdr_loss": valid_loss["valid/holdr_loss"],
+                  "valid_holdr/distance_frames_before_subtask_loss": valid_loss["valid/distance_frames_before_subtask_loss"],
+                  "valid_holdr/distance_subtask_means_loss": valid_loss["valid/distance_subtask_means_loss"],
+                  "step": global_step,
+                  "epoch": epoch,
+              }, step=global_step)
+              
         stopwatch.reset()
       epoch += 1
 

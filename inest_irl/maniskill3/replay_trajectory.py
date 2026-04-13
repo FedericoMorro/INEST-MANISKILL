@@ -501,7 +501,7 @@ def _make_env(env_id, **kwargs):
     if env_id == "StackPyramid-v1":
         import stack_pyramid as local_stack_pyramid
 
-        return local_stack_pyramid.StackPyramidEnv(**kwargs)
+        return local_stack_pyramid.StackPyramidEnv(randomize_cubes=True, **kwargs)
     return gym.make(env_id, **kwargs)
 
 

@@ -55,8 +55,8 @@ def get_config():
   config.replay_buffer_capacity = 1_000_000
   config.num_seed_steps = 30_000
   config.num_eval_episodes = 50 #150
-  config.eval_frequency = 500_000
-  config.checkpoint_frequency = 500_000
+  config.eval_frequency = 1_000_000
+  config.checkpoint_frequency = 1_000_000
   config.log_frequency = 1_000 #20_000
   config.save_video = True
 
@@ -69,7 +69,7 @@ def get_config():
   config.sac.action_dim = action_dim
   config.sac.action_range = action_range
   config.sac.discount = 0.995
-  config.sac.init_temperature = 2.0
+  config.sac.init_temperature = 1.0
   config.sac.alpha_lr = 1e-4
   config.sac.alpha_betas = [0.9, 0.999]
   config.sac.actor_lr = 1e-4
@@ -79,10 +79,10 @@ def get_config():
   config.sac.critic_betas = [0.9, 0.999]
   config.sac.critic_tau = 0.005
   config.sac.critic_target_update_frequency = 2
-  config.sac.batch_size = 512
+  config.sac.batch_size = 256
   config.sac.learnable_temperature = True
-  config.sac.target_entropy = None  # set to -|A| if None
-  config.sac.action_noise_std = 0.2
+  config.sac.target_entropy = -3.5  # set to -|A| if None
+  config.sac.action_noise_std = None
 
   # ================================================= #
   # Critic parameters.

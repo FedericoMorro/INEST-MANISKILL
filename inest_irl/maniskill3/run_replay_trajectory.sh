@@ -1,6 +1,6 @@
 #!/bin/bash
 
-python ~/INEST-MANISKILL/maniskill3/replay_trajectory.py \
+python /home/fmorro/INEST-MANISKILL/inest_irl/maniskill3/replay_trajectory.py \
     --traj-path $1 \
     --output_path $2 \
     --obs-mode rgb \

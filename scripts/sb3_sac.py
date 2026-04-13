@@ -106,6 +106,16 @@ class WandbCallback(BaseCallback):
             except Exception:
                 pass
 
+            # Extract rollout stats from ep_info_buffer
+            try:
+                if hasattr(self.model, 'ep_info_buffer') and len(self.model.ep_info_buffer) > 0:
+                    rewards = [ep_info["r"] for ep_info in self.model.ep_info_buffer]
+                    lengths = [ep_info["l"] for ep_info in self.model.ep_info_buffer]
+                    metrics['rollout/ep_rew_mean'] = float(np.mean(rewards))
+                    metrics['rollout/ep_len_mean'] = float(np.mean(lengths))
+            except Exception:
+                pass
+
             try:
                 wandb.log(metrics, step=self.num_timesteps)
             except Exception:
@@ -321,14 +331,18 @@ def main(_):
     logging.info(f"Policy network architecture: {policy_kwargs}")
 
     # Configure action noise
-    action_noise = VectorizedActionNoise(
-        NormalActionNoise(
-            mean=np.zeros(action_space.shape[0]),
-            sigma=config.sac.action_noise_std * np.ones(action_space.shape[0]),
-        ),
-        n_envs=config.num_envs,
-    )
-    logging.info(f"Using action noise: {action_noise}")
+    if config.sac.action_noise_std is not None and config.sac.action_noise_std > 0:
+        action_noise = VectorizedActionNoise(
+            NormalActionNoise(
+                mean=np.zeros(action_space.shape[0]),
+                sigma=config.sac.action_noise_std * np.ones(action_space.shape[0]),
+            ),
+            n_envs=config.num_envs,
+        )
+        logging.info(f"Using action noise: {action_noise}")
+    else:   
+        action_noise = None
+        logging.info("No action noise will be used.")
 
     # Create SAC model with TensorBoard logging
     tb_log_dir = os.path.join(exp_dir, "tensorboard")
@@ -353,6 +367,29 @@ def main(_):
         device=device,
         verbose=1,
     )
+
+    # Override optimizers with component-specific learning rates and betas
+    logging.info("Setting up component-specific optimizers...")
+    model.actor.optimizer = torch.optim.Adam(
+        model.actor.parameters(),
+        lr=config.sac.actor_lr,
+        betas=config.sac.actor_betas,
+    )
+    model.critic.optimizer = torch.optim.Adam(
+        model.critic.parameters(),
+        lr=config.sac.critic_lr,
+        betas=config.sac.critic_betas,
+    )
+    logging.info(f"Actor LR: {config.sac.actor_lr}, betas: {config.sac.actor_betas}")
+    logging.info(f"Critic LR: {config.sac.critic_lr}, betas: {config.sac.critic_betas}")
+    
+    if model.ent_coef_optimizer is not None:
+        model.ent_coef_optimizer = torch.optim.Adam(
+            [model.log_ent_coef],
+            lr=config.sac.alpha_lr,
+            betas=config.sac.alpha_betas,
+        )
+        logging.info(f"Alpha LR: {config.sac.alpha_lr}, betas: {config.sac.alpha_betas}")
 
     # Setup callbacks
     callbacks = []

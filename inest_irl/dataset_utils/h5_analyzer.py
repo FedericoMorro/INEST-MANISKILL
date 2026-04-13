@@ -7,6 +7,7 @@ python inest_irl/dataset_utils/h5_analyzer.py
 	[--sample_traj]
 	[--stats]
 	[--rewards]
+    [--no_plot_all_rew]
 	[--output_path out]
 	[--subgoals path/to/subgoal/otherwise/search/data/folder]
 """
@@ -280,7 +281,7 @@ def _save_demo_videos(h5_file, demo_names, output_dir, subgoals_data=None):
         writer.close()
 
 
-def _plot_reward_curves(h5_file, demo_names, subgoals_data=None, output_dir=None):
+def _plot_reward_curves(h5_file, demo_names, subgoals_data=None, output_dir=None, no_plot_all_rew=False):
     print("Plotting reward curves for all demos...")
     out_dir = os.path.join(output_dir, "reward_curves")
     os.makedirs(out_dir, exist_ok=True)
@@ -294,6 +295,9 @@ def _plot_reward_curves(h5_file, demo_names, subgoals_data=None, output_dir=None
             continue
         rewards = np.asarray(rewards)
         all_rewards.append(rewards)
+
+        if no_plot_all_rew:
+            continue
 
         fig, ax = plt.subplots(1, 1, figsize=FIGSIZE_TRAJ)
         timesteps = np.arange(rewards.shape[0])
@@ -337,6 +341,29 @@ def _plot_reward_curves(h5_file, demo_names, subgoals_data=None, output_dir=None
         plt.savefig(os.path.join(out_dir, "_avg_reward.png"), bbox_inches='tight', dpi=300)
         plt.close()
 
+        min_rew, max_rew = np.inf, -np.inf
+        end_traj_rews = []
+        for r in all_rewards:
+            r_no_1 = [x for x in r if x != 1.0]
+            min_rew = min(min_rew, np.nanmin(r_no_1))
+            max_rew = max(max_rew, np.nanmax(r_no_1))
+            end_traj_rews.append(r_no_1[-1])
+
+
+        with open(os.path.join(out_dir, "_reward_summary.txt"), "w") as f:
+            f.write(f"OVERALL\n")
+            f.write(f"  # of trajs: {len(all_rewards)}\n")
+            f.write(f"  Min reward: {min_rew:.3f}\n")
+            f.write(f"  Max reward: {max_rew:.3f}\n")
+            f.write(f"  Avg reward: {np.nanmean(mean_rewards):.3f}\n")
+            f.write(f"  Std reward: {np.nanmean(std_rewards):.3f}\n")
+            f.write(f"\nINIT - END\n")
+            f.write(f"  Avg reward t = 0:   {mean_rewards[0]:.3f}\n")
+            f.write(f"  Std reward t = 0:   {std_rewards[0]:.3f}\n")
+            f.write(f"  Avg reward t = max: {np.nanmean(end_traj_rews):.3f}\n")
+            f.write(f"  Std reward t = max: {np.nanstd(end_traj_rews):.3f}\n")
+            f.write(f"\nNote: reward==1.0 removed, since it is the terminal reward\n")
+
     print(f"Saved reward curve plots to: {out_dir}")
 
 
@@ -347,6 +374,7 @@ if __name__ == "__main__":
     parser.add_argument("--sample_traj", action="store_true", help="Create trajectory plot images")
     parser.add_argument("--stats", action="store_true", help="Create txt file with dataset stats")
     parser.add_argument("--rewards", action="store_true", help="Plot reward curves for all demos")
+    parser.add_argument("--no_plot_all_rew", action="store_true", help="Skip plotting reward curves for all demos (compute only summary stats and mean plot)")
     parser.add_argument("--output_path", type=str, default="out", help="Output directory for visualizations and stats")
     parser.add_argument("--subgoals", type=str, default=None, help="Path to subgoal_frame.json (optional, if not specified, same folder as h5 file will be checked)")
     args = parser.parse_args()
@@ -354,14 +382,13 @@ if __name__ == "__main__":
     if not os.path.exists(args.output_path):
         os.makedirs(args.output_path, exist_ok=True)
 
+    subgoals_path = None
     if args.subgoals is None:
         # check if in same folder as h5 file
         dir_name = os.path.dirname(args.filepath)
         expected_path = os.path.join(dir_name, "subgoal_frames.json")
         if os.path.exists(expected_path):
             subgoals_path = expected_path
-    else:
-        subgoals_path = args.subgoals
 
     if subgoals_path is not None:
         with open(subgoals_path, 'r') as f:
@@ -393,7 +420,7 @@ if __name__ == "__main__":
 
         # create output path for plots and stats
         dir_name = os.path.dirname(args.filepath).split("/")[-1]
-        out_path = os.path.join(args.output_path, f"{dir_name}_visualizations")
+        out_path = os.path.join(args.output_path, f"{dir_name}_viz")
         os.makedirs(out_path, exist_ok=True)
         print(f"Output path for visualizations and stats: {out_path}")
 
@@ -410,5 +437,6 @@ if __name__ == "__main__":
 
         # plot reward curves for all demos
         if args.rewards:
-            _plot_reward_curves(f, demo_names, subgoals_data=subgoals_data, output_dir=out_path)
+            _plot_reward_curves(f, demo_names,
+                subgoals_data=subgoals_data, output_dir=out_path, no_plot_all_rew=args.no_plot_all_rew)
 

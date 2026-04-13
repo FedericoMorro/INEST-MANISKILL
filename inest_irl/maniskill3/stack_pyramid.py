@@ -25,7 +25,11 @@ from mani_skill.utils.scene_builder.table import TableSceneBuilder
 from mani_skill.utils.structs.pose import Pose
 
 
-@register_env("StackPyramid-v1custom", max_episode_steps=100)
+HORIZON = 100
+DEFAULT_RANDOMIZE_CUBES = False
+
+
+@register_env("StackPyramid-v1custom", max_episode_steps=HORIZON)
 class StackPyramidEnv(BaseEnv):
     """
     **Task Description:**
@@ -54,7 +58,7 @@ class StackPyramidEnv(BaseEnv):
         *args,
         robot_uids="panda_wristcam",
         robot_init_qpos_noise=0.02,
-        randomize_cubes=False,
+        randomize_cubes=DEFAULT_RANDOMIZE_CUBES,
         **kwargs
     ):
         print("Initializing custom StackPyramid environment")
@@ -290,7 +294,8 @@ class StackPyramidEnv(BaseEnv):
             reward = -1.0 + (
                 self._distance_to_reward(distance_eef_A) +
                 self._distance_to_reward(distance_AB)
-            ) / 2.0
+            ) / 1.5
+            reward -= 0.7
 
         elif current_step == 1:
             # reward based on distance of eef to cube C, and distance of cube C to cube A and B,
@@ -303,10 +308,11 @@ class StackPyramidEnv(BaseEnv):
 
             # in [0,1], equal contribution eef-C, AB-to-C, grasp+height bonus
             reward = (
-                self._distance_to_reward(distance_eef_C) +
-                (self._distance_to_reward(distance_AC) + self._distance_to_reward(distance_BC)) / 2.0 +
+                self._distance_to_reward(distance_eef_C) * 2.0 +
+                (self._distance_to_reward(distance_AC) + self._distance_to_reward(distance_BC)) +
                 (z_flag.float() + grasp_flag.float()) / 2.0
             ) / 3.0
+            reward -= 0.7
 
         else:
             reward = 1.0

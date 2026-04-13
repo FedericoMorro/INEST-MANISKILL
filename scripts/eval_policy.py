@@ -23,6 +23,9 @@ flags.DEFINE_integer("num_episodes", 10, "Number of evaluation episodes.")
 flags.DEFINE_boolean("save_video", True, "Whether to save video recordings.")
 flags.DEFINE_string("device", "cpu", "Device to use (e.g., 'cpu', 'cuda:0').")
 
+HORIZON = 100
+DETERMINISTIC = True
+
 # Report-friendly plotting defaults
 FIGSIZE_TRAJ = (7.0, 3.6)
 FIGSIZE_SUMMARY = (12.0, 4.5)
@@ -194,8 +197,8 @@ def _run_episode(model, env, video_path=None):
     step_rewards = []
     frames = []
     
-    while step_count < 250:
-        action, _ = model.predict(obs, deterministic=True)
+    while step_count < HORIZON:
+        action, _ = model.predict(obs, deterministic=DETERMINISTIC)
         step_result = env.step(action)
         
         if len(step_result) == 5:
