@@ -16,6 +16,7 @@ from tensorboard.backend.event_processing import event_accumulator
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.evaluation import evaluate_policy
 from stable_baselines3.common.monitor import Monitor
+from stable_baselines3.common.noise import NormalActionNoise, VectorizedActionNoise
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecMonitor
 
 from inest_irl.utils import utils
@@ -313,11 +314,21 @@ def main(_):
     # Configure policy network architecture
     policy_kwargs = {
         "net_arch": {
-            "pi": [config.sac.actor.hidden_dim] * config.sac.actor.hidden_depth,
-            "qf": [config.sac.critic.hidden_dim] * config.sac.critic.hidden_depth,
+            "pi": config.sac.actor.net_arch,
+            "qf": config.sac.critic.net_arch,
         }
     }
     logging.info(f"Policy network architecture: {policy_kwargs}")
+
+    # Configure action noise
+    action_noise = VectorizedActionNoise(
+        NormalActionNoise(
+            mean=np.zeros(action_space.shape[0]),
+            sigma=config.sac.action_noise_std * np.ones(action_space.shape[0]),
+        ),
+        n_envs=config.num_envs,
+    )
+    logging.info(f"Using action noise: {action_noise}")
 
     # Create SAC model with TensorBoard logging
     tb_log_dir = os.path.join(exp_dir, "tensorboard")
@@ -332,6 +343,8 @@ def main(_):
         batch_size=config.sac.batch_size,
         tau=config.sac.critic_tau,
         gamma=config.sac.discount,
+        action_noise=action_noise,
+        ent_coef=f'auto_{config.sac.init_temperature}',
         train_freq=1,
         gradient_steps=1,
         target_entropy=config.sac.target_entropy if config.sac.target_entropy is not None else -action_space.shape[0],

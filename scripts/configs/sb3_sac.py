@@ -68,8 +68,8 @@ def get_config():
   config.sac.obs_dim = obs_dim
   config.sac.action_dim = action_dim
   config.sac.action_range = action_range
-  config.sac.discount = 0.99
-  config.sac.init_temperature = 1.0
+  config.sac.discount = 0.995
+  config.sac.init_temperature = 2.0
   config.sac.alpha_lr = 1e-4
   config.sac.alpha_betas = [0.9, 0.999]
   config.sac.actor_lr = 1e-4
@@ -77,11 +77,12 @@ def get_config():
   config.sac.actor_update_frequency = 1
   config.sac.critic_lr = 3e-5
   config.sac.critic_betas = [0.9, 0.999]
-  config.sac.critic_tau = 0.01
+  config.sac.critic_tau = 0.005
   config.sac.critic_target_update_frequency = 2
-  config.sac.batch_size = 1024
+  config.sac.batch_size = 512
   config.sac.learnable_temperature = True
   config.sac.target_entropy = None  # set to -|A| if None
+  config.sac.action_noise_std = 0.2
 
   # ================================================= #
   # Critic parameters.
@@ -90,8 +91,7 @@ def get_config():
 
   config.sac.critic.obs_dim = obs_dim
   config.sac.critic.action_dim = action_dim
-  config.sac.critic.hidden_dim = 256
-  config.sac.critic.hidden_depth = 3
+  config.sac.critic.net_arch = [512, 256, 256]
 
   # ================================================= #
   # Actor parameters.
@@ -100,8 +100,7 @@ def get_config():
 
   config.sac.actor.obs_dim = obs_dim
   config.sac.actor.action_dim = action_dim
-  config.sac.actor.hidden_dim = 256
-  config.sac.actor.hidden_depth = 3
+  config.sac.actor.net_arch = [512, 256, 256]
   config.sac.actor.log_std_bounds = [-5, 2]
 
   # ================================================= #
