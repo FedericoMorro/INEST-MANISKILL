@@ -1,4 +1,4 @@
-from typing import Any, ClassVar, TypeVar
+from typing import Any, Callable, ClassVar, TypeVar
 
 import numpy as np
 import torch as th
@@ -118,6 +118,8 @@ class SAC(OffPolicyAlgorithm):
         seed: int | None = None,
         device: th.device | str = "auto",
         _init_setup_model: bool = True,
+
+        target_entropy_anneal: Callable[[int], float] | None = None,
     ):
         super().__init__(
             policy,
@@ -155,6 +157,8 @@ class SAC(OffPolicyAlgorithm):
         self.ent_coef = ent_coef
         self.target_update_interval = target_update_interval
         self.ent_coef_optimizer: th.optim.Adam | None = None
+
+        self.target_entropy_anneal = target_entropy_anneal
 
         if _init_setup_model:
             self._setup_model()
@@ -229,6 +233,12 @@ class SAC(OffPolicyAlgorithm):
 
             ent_coef_loss = None
             if self.ent_coef_optimizer is not None and self.log_ent_coef is not None:
+
+                # Anneal the target entropy if a function is provided
+                if self.target_entropy_anneal is not None:
+                    self.target_entropy = self.target_entropy_anneal(self.num_timesteps)
+                    self.logger.record("train/target_entropy", self.target_entropy)
+
                 # Important: detach the variable from the graph
                 # so we don't change it with other losses
                 # see https://github.com/rail-berkeley/softlearning/issues/60

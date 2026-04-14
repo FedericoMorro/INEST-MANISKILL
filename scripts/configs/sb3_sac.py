@@ -81,8 +81,13 @@ def get_config():
   config.sac.critic_target_update_frequency = 2
   config.sac.batch_size = 256
   config.sac.learnable_temperature = True
-  config.sac.target_entropy = -3.5  # set to -|A| if None
+  config.sac.target_entropy = -3.5  # set to -|A| if None, if annealing it is the final value
   config.sac.action_noise_std = 0.0
+
+  config.sac.anneal_target_entropy = True
+  config.sac.start_entropy_anneal = 50_000
+  config.sac.end_entropy_anneal = 40_000_000
+  config.initial_target_entropy = 0.0
 
   # ================================================= #
   # Critic parameters.

@@ -359,6 +359,18 @@ def main(_):
         action_noise = None
         logging.info("No action noise will be used.")
 
+    # Define target entropy annealing function
+    def target_entropy_anneal(current_step):
+        final_target_entropy = config.sac.target_entropy if config.sac.target_entropy is not None else -action_space.shape[0]
+        if current_step < config.sac.start_entropy_anneal:
+            return config.initial_target_entropy
+        elif current_step > config.sac.end_entropy_anneal:
+            return final_target_entropy
+        else:
+            # linear annealing from initial_target_entropy to final_target_entropy
+            progress = (current_step - config.sac.start_entropy_anneal) / (config.sac.end_entropy_anneal - config.sac.start_entropy_anneal)
+            return config.initial_target_entropy + progress * (final_target_entropy - config.initial_target_entropy)
+
     # Create SAC model with TensorBoard logging
     tb_log_dir = os.path.join(exp_dir, "tensorboard")
     logging.info(f"TensorBoard logs will be saved to: {tb_log_dir}")
@@ -381,6 +393,7 @@ def main(_):
         tensorboard_log=tb_log_dir,
         device=device,
         verbose=1,
+        target_entropy_anneal=target_entropy_anneal if config.sac.anneal_target_entropy else None,
     )
 
     # Override optimizers with component-specific learning rates and betas
@@ -447,15 +460,13 @@ def main(_):
     )
     
     eval_stats = {
-        "eval/mean_episode_reward": float(mean_reward),
-        "eval/std_episode_reward": float(std_reward),
+        "eval/mean_reward": float(mean_reward),
+        "eval/std_reward": float(std_reward),
     }
     
     logging.info(f"Final evaluation results:")
     for key, value in eval_stats.items():
         logging.info(f"  {key}: {value:.4f}")
-        if FLAGS.wandb:
-            wandb.log({key: value})
 
     # Save final model
     model_path = os.path.join(exp_dir, "final_model")
