@@ -12,28 +12,47 @@ import numpy as np
 
 # Import the stack pyramid env to register it
 from inest_irl.maniskill3.stack_pyramid import StackPyramidEnv
+from inest_irl.utils import utils
 
 
 def main():
-    """Create and test StackPyramid environment without randomization."""
-    print("Creating StackPyramid-v1custom environment without cube randomizations...")
+    """Create and test StackPyramid environment as it's created in SAC training."""
+    print("Creating StackPyramid-v1custom environment using utils.make_env (like in sb3_sac.py)...")
     
-    # Create environment with randomize_cubes=False
-    env = gym.make(
-        "StackPyramid-v1custom",
+    # Create environment the same way as in sb3_sac.py
+    # Note: EpisodeMonitor wrapper changes the return format, so we disable it for this test
+    # In actual training, it's wrapped by Monitor/VecMonitor and GymCompatibilityWrapper in sb3_sac.py
+    env = utils.make_env(
+        env_name="StackPyramid-v1custom",
+        seed=22,
         obs_mode="state",
-        control_mode="pd_ee_delta_pose",
-        render_mode="human",
-        randomize_cubes=False,
+        action_repeat=1,
+        frame_stack=1,  # Using frame_stack=1 for clearer testing
+        add_episode_monitor=False,  # Disabled to see raw gymnasium output
     )
     
     print("Environment created successfully!")
     print(f"Observation space: {env.observation_space}")
     print(f"Action space: {env.action_space}")
+    print("This matches SAC training environment setup.")
     
     # Reset environment to get initial state
     print("\nResetting environment...")
-    obs, info = env.reset()
+    reset_result = env.reset()
+    
+    # Handle different wrapper return formats
+    if isinstance(reset_result, tuple):
+        if len(reset_result) == 2:
+            obs, info = reset_result
+        elif len(reset_result) == 3:
+            # FrameStack returns (obs, info, state) or similar
+            obs, info, _ = reset_result
+        else:
+            obs = reset_result[0]
+            info = reset_result[1] if len(reset_result) > 1 else {}
+    else:
+        obs = reset_result
+        info = {}
     
     print("\nInitial state captured!")
     print(f"\nObservation keys: {obs.keys() if isinstance(obs, dict) else 'array'}")
@@ -69,8 +88,24 @@ def main():
     print("\nRunning 5 random action steps...")
     for step in range(5):
         action = env.action_space.sample()
-        obs, reward, terminated, truncated, info = env.step(action)
+        step_result = env.step(action)
+        
+        # Handle different wrapper return formats
+        if isinstance(step_result, tuple):
+            if len(step_result) == 5:
+                obs, reward, terminated, truncated, info = step_result
+            elif len(step_result) == 6:
+                # Some wrappers might return 6 values
+                obs, reward, terminated, truncated, info, _ = step_result
+            else:
+                obs = step_result[0]
+                reward = step_result[1] if len(step_result) > 1 else 0.0
+                terminated = step_result[2] if len(step_result) > 2 else False
+                truncated = step_result[3] if len(step_result) > 3 else False
+                info = step_result[4] if len(step_result) > 4 else {}
+        
         print(f"Step {step+1}: reward={reward:.4f}, terminated={terminated}, truncated={truncated}")
+        print(info)
         env.render()
         
         if terminated or truncated:

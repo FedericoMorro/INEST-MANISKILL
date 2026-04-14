@@ -389,7 +389,6 @@ def replay_cpu_sim(
                 # subgoals: (0) reach cubeA, (1) move cubeA, (2) reach cubeC, (3) stack cubeC on cubeA and cubeB
                 # get initial position of cube A, and init subgoal frames list
                 if subtask_enabled:
-                    prev_cubeA_pos = env.unwrapped.cubeA.pose.p
                     subgoal_frames = []
 
                 n = len(ori_actions)
@@ -400,34 +399,11 @@ def replay_cpu_sim(
                         pbar.update()
                     _, _, _, truncated, info = env.step(a)
 
-                    # refer to https://github.com/haosulab/ManiSkill/blob/8c8d33916e07984057cf3d30e5cb9d5c26377b03/mani_skill/envs/tasks/tabletop/stack_pyramid.py
-                    #   or to ../stack_pyramid.py in this repo
+                    # check if subgoal is reached and save frames for subtask segmentation
                     if subtask_enabled:
-
-                        def _is_equal_tensor(a, b, eps=1e-3):
-                            return torch.norm(a - b) < eps
-
-                        subgoal = len(subgoal_frames)
-                        curr_cubeA_pos = env.unwrapped.cubeA.pose.p
-                        curr_cubeB_pos = env.unwrapped.cubeB.pose.p
-                        curr_cubeC_pos = env.unwrapped.cubeC.pose.p
-                        if subgoal == 0 and not _is_equal_tensor(curr_cubeA_pos, prev_cubeA_pos):   # pose changed from init
+                        curr_subgoal = env.base_env.get_current_subgoal()
+                        if len(subgoal_frames) != curr_subgoal:
                             subgoal_frames.append(t)
-                        elif subgoal == 1 and (_is_equal_tensor(curr_cubeA_pos, prev_cubeA_pos)     # cubeA stopped moving after moving
-                                and env.unwrapped.success_per_subgoal("A_B")):        # and success A_B (A next to B)
-                            subgoal_frames.append(t)
-                            prev_cubeC_pos = curr_cubeC_pos
-                        elif subgoal == 2 and not _is_equal_tensor(curr_cubeC_pos, prev_cubeC_pos): # pose changed from init
-                            subgoal_frames.append(t)
-                        elif subgoal == 3 and (_is_equal_tensor(curr_cubeC_pos, prev_cubeC_pos)     # cubeC stopped moving after moving
-                                and env.unwrapped.success_per_subgoal("C_B") and env.unwrapped.success_per_subgoal("C_A")):        #  and success C_B and success C_A (C on top of A and B)
-                            subgoal_frames.append(t)
-
-                        subgoal = len(subgoal_frames)
-                        if subgoal == 1:    # update prev_cubeA_pos to check when it stops moving
-                            prev_cubeA_pos = curr_cubeA_pos
-                        elif subgoal == 3:  # update prev_cubeC_pos to check when it stops moving
-                            prev_cubeC_pos = curr_cubeC_pos
 
                     if args.use_env_states:
                         env.base_env.set_state_dict(ori_env_states[t])

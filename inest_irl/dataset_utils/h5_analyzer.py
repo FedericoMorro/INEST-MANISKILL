@@ -344,10 +344,11 @@ def _plot_reward_curves(h5_file, demo_names, subgoals_data=None, output_dir=None
         min_rew, max_rew = np.inf, -np.inf
         end_traj_rews = []
         for r in all_rewards:
-            r_no_1 = [x for x in r if x != 1.0]
-            min_rew = min(min_rew, np.nanmin(r_no_1))
-            max_rew = max(max_rew, np.nanmax(r_no_1))
-            end_traj_rews.append(r_no_1[-1])
+            r_final = r[-1] if len(r) > 0 else np.nan
+            r_no_final = [x for x in r if x != r_final]
+            min_rew = min(min_rew, np.nanmin(r_no_final))
+            max_rew = max(max_rew, np.nanmax(r_no_final))
+            end_traj_rews.append(r_no_final[-1])
 
 
         with open(os.path.join(out_dir, "_reward_summary.txt"), "w") as f:

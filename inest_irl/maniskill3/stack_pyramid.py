@@ -161,15 +161,15 @@ class StackPyramidEnv(BaseEnv):
                 identity_q = torch.tensor([1, 0, 0, 0], device=self.device).unsqueeze(0).repeat(b, 1)
                 
                 # Cube A - red, at origin on table
-                cubeA_pos = torch.tensor([[-0.08, 0.08, 0.04]], device=self.device).repeat(b, 1)
+                cubeA_pos = torch.tensor([[-0.08, 0.08, 0.02]], device=self.device).repeat(b, 1)
                 self.cubeA.set_pose(Pose.create_from_pq(p=cubeA_pos, q=identity_q))
                 
                 # Cube B - green, offset along x-axis
-                cubeB_pos = torch.tensor([[0.08, 0.00, 0.04]], device=self.device).repeat(b, 1)
+                cubeB_pos = torch.tensor([[0.08, 0.00, 0.02]], device=self.device).repeat(b, 1)
                 self.cubeB.set_pose(Pose.create_from_pq(p=cubeB_pos, q=identity_q))
                 
                 # Cube C - blue, offset along negative x-axis
-                cubeC_pos = torch.tensor([[-0.08, -0.08, 0.04]], device=self.device).repeat(b, 1)
+                cubeC_pos = torch.tensor([[-0.08, -0.08, 0.02]], device=self.device).repeat(b, 1)
                 self.cubeC.set_pose(Pose.create_from_pq(p=cubeC_pos, q=identity_q))
 
     def evaluate(self):
@@ -193,40 +193,90 @@ class StackPyramidEnv(BaseEnv):
             "success": success,
         }
 
-    def _evaluate_cube_distance(self, offset, cube_a, cube_b, top_or_next):
+    def _evaluate_cube_distance(self, offset, cube_1, cube_2, top_or_next):
         xy_flag = (
             torch.linalg.norm(offset[..., :2], axis=1)
             <= torch.linalg.norm(2 * self.cube_half_size[:2]) + 0.005   # 0.0616
         )
         z_flag = torch.abs(offset[..., 2]) > 0.02
         if top_or_next == "top":
-            is_cubeA_on_cubeB = torch.logical_and(xy_flag, z_flag)
+            is_cube1_on_cube2 = torch.logical_and(xy_flag, z_flag)
         elif top_or_next == "next_to":
-            is_cubeA_on_cubeB = xy_flag
+            is_cube1_on_cube2 = xy_flag
         else:
             return NotImplementedError(
                 f"Expect top_or_next to be either 'top' or 'next_to', got {top_or_next}"
             )
 
-        is_cubeA_static = cube_a.is_static(lin_thresh=1e-2, ang_thresh=0.5)
-        is_cubeA_grasped = self.agent.is_grasping(cube_a)
+        is_cube1_static = cube_1.is_static(lin_thresh=1e-2, ang_thresh=0.5)
+        is_cube1_grasped = self.agent.is_grasping(cube_1)
 
-        success = is_cubeA_on_cubeB & is_cubeA_static & (~is_cubeA_grasped)
+        success = is_cube1_on_cube2 & is_cube1_static & (~is_cube1_grasped)
         return success.bool()
 
-    def success_per_subgoal(self, success_type: str):
-        if success_type == "A_B":
+    def _success_per_cubes(self, cubes_type: str):
+        if cubes_type == "A_B":
             return self._evaluate_cube_distance(
                 self.cubeA.pose.p - self.cubeB.pose.p, self.cubeA, self.cubeB, "next_to"
             )
-        elif success_type == "C_B":
+        elif cubes_type == "C_B":
             return self._evaluate_cube_distance(
                 self.cubeC.pose.p - self.cubeB.pose.p, self.cubeC, self.cubeB, "top"
             )
-        elif success_type == "C_A":
+        elif cubes_type == "C_A":
             return self._evaluate_cube_distance(
                 self.cubeC.pose.p - self.cubeA.pose.p, self.cubeC, self.cubeA, "top"
             )
+
+    def _update_subgoal_success(self):
+
+        def _is_equal_tensor(a, b, eps=1e-3):
+            return torch.norm(a - b) < eps
+
+        curr_cubeA_pos = self.cubeA.pose.p
+        curr_cubeB_pos = self.cubeB.pose.p
+        curr_cubeC_pos = self.cubeC.pose.p
+
+        # detect subgoal transitions based on cube position changes and success conditions
+        if self.curr_subgoal == 0 and not _is_equal_tensor(curr_cubeA_pos, self.prev_cubeA_pos):   # pose changed from init
+            self.curr_subgoal = 1
+
+        elif self.curr_subgoal == 1 and (_is_equal_tensor(curr_cubeA_pos, self.prev_cubeA_pos)     # cubeA stopped moving after moving
+                and self._success_per_cubes("A_B")):        # and success A_B (A next to B)
+            self.curr_subgoal = 2
+            self.prev_cubeC_pos = curr_cubeC_pos
+
+        elif self.curr_subgoal == 2 and not _is_equal_tensor(curr_cubeC_pos, self.prev_cubeC_pos): # pose changed from init
+            self.curr_subgoal = 3
+
+        elif self.curr_subgoal == 3 and (_is_equal_tensor(curr_cubeC_pos, self.prev_cubeC_pos)     # cubeC stopped moving after moving
+                and self._success_per_cubes("C_B") and self._success_per_cubes("C_A")):        #  and success C_B and success C_A (C on top of A and B)
+            self.curr_subgoal = 4
+
+        # update prev positions for next step, if the current subgoal is the one that requires movement, to check when it stops moving in the next step
+        if self.curr_subgoal == 1:    # update prev_cubeA_pos to check when it stops moving
+            self.prev_cubeA_pos = curr_cubeA_pos
+        elif self.curr_subgoal == 3:  # update prev_cubeC_pos to check when it stops moving
+            self.prev_cubeC_pos = curr_cubeC_pos
+    
+    def get_current_subgoal(self):
+        return self.curr_subgoal
+
+
+    def step(self, action):
+        obs, reward, terminated, truncated, info = super().step(action)
+
+        # init subgoal tracking at the first step of the episode
+        if info["elapsed_steps"] == 1:
+            self.prev_cubeA_pos = self.cubeA.pose.p
+            self.curr_subgoal = 0
+
+        # update subgoal success and add it to info
+        self._update_subgoal_success()
+        info["current_subgoal"] = self.curr_subgoal
+
+        return obs, reward, terminated, truncated, info
+
 
     def _get_obs_extra(self, info: dict):
         obs = dict(tcp_pose=self.agent.tcp.pose.raw_pose)
@@ -315,7 +365,7 @@ class StackPyramidEnv(BaseEnv):
             reward -= 0.7
 
         else:
-            reward = 1.0
+            reward = 1.1
         
         return np.array(reward)
     
