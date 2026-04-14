@@ -161,20 +161,23 @@ class EvalSaveCallback(BaseCallback):
             self._last_eval = step
 
             try:
-                rewards, lengths = evaluate_policy(
+                rewards, lengths, subgoals_dict = evaluate_policy(
                     self.model,
                     self.eval_env,
                     n_eval_episodes=self.n_eval_episodes,
                     deterministic=True,
                     return_episode_rewards=True,
+                    return_episode_subgoals=True,
                 )
                 mean_reward = float(np.mean(rewards))
                 std_reward = float(np.std(rewards))
                 mean_length = float(np.mean(lengths))
-            except Exception:
+            except Exception as e:
+                logging.warning(f"Evaluation failed at step {step}: {e}")
                 mean_reward = float("nan")
                 std_reward = float("nan")
                 mean_length = float("nan")
+                subgoals_dict = {}
 
             # Save evaluation results to JSON
             eval_dir = os.path.join(self.exp_dir, "evaluation")
@@ -187,6 +190,7 @@ class EvalSaveCallback(BaseCallback):
                         "std_reward": std_reward,
                         "mean_length": mean_length,
                         "rewards": rewards if isinstance(rewards, list) else list(rewards),
+                        "subgoals": subgoals_dict,
                     }, f, indent=2)
             except Exception:
                 pass
@@ -205,6 +209,13 @@ class EvalSaveCallback(BaseCallback):
                         "eval/mean_length": mean_length,
                         "train/step": step,
                     }
+
+                    for subgoal, val in subgoals_dict.items():
+                        if subgoal == 0:
+                            log_dict[f"eval/failed_%"] = val
+                        else:
+                            log_dict[f"eval/subgoal_{subgoal}_%"] = val
+
                     wandb.log(log_dict, step=step)
                 except Exception:
                     pass

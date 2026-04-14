@@ -54,8 +54,8 @@ def get_config():
   config.num_train_steps = 30_000_000
   config.replay_buffer_capacity = 1_000_000
   config.num_seed_steps = 30_000
-  config.num_eval_episodes = 50 #150
-  config.eval_frequency = 1_000_000
+  config.num_eval_episodes = 5 #150
+  config.eval_frequency = 10_000
   config.checkpoint_frequency = 1_000_000
   config.log_frequency = 1_000 #20_000
   config.save_video = True

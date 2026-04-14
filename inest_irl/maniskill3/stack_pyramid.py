@@ -65,6 +65,7 @@ class StackPyramidEnv(BaseEnv):
         self.robot_init_qpos_noise = robot_init_qpos_noise
         self.randomize_cubes = randomize_cubes
         kwargs["reward_mode"] = "normalized_dense"
+        self.max_subgoal = 4
         super().__init__(*args, robot_uids=robot_uids, **kwargs)
 
     @property
@@ -273,7 +274,7 @@ class StackPyramidEnv(BaseEnv):
 
         # update subgoal success and add it to info
         self._update_subgoal_success()
-        info["current_subgoal"] = self.curr_subgoal
+        info["subgoal"] = self.curr_subgoal
 
         return obs, reward, terminated, truncated, info
 

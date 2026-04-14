@@ -19,6 +19,9 @@ def evaluate_policy(
     reward_threshold: float | None = None,
     return_episode_rewards: bool = False,
     warn: bool = True,
+
+    return_episode_subgoals: bool = False,
+
 ) -> tuple[float, float] | tuple[list[float], list[int]]:
     """
     Runs the policy for ``n_eval_episodes`` episodes and outputs the average return
@@ -79,6 +82,10 @@ def evaluate_policy(
     episode_rewards = []
     episode_lengths = []
 
+    if return_episode_subgoals:
+        episodes_subgoals = [0] * n_eval_episodes
+        max_subgoal = env.get_attr("max_subgoal", 0)[0]
+
     episode_counts = np.zeros(n_envs, dtype="int")
     # Divides episodes among different sub environments in the vector as evenly as possible
     episode_count_targets = np.array([(n_eval_episodes + i) // n_envs for i in range(n_envs)], dtype="int")
@@ -105,6 +112,9 @@ def evaluate_policy(
                 done = dones[i]
                 info = infos[i]
                 episode_starts[i] = done
+
+                if return_episode_subgoals:
+                    episodes_subgoals[i] = info.get("subgoal", episodes_subgoals[i])
 
                 if callback is not None:
                     callback(locals(), globals())
@@ -136,8 +146,30 @@ def evaluate_policy(
 
     mean_reward = np.mean(episode_rewards)
     std_reward = np.std(episode_rewards)
+
     if reward_threshold is not None:
         assert mean_reward > reward_threshold, "Mean reward below threshold: " f"{mean_reward:.2f} < {reward_threshold:.2f}"
+
+    if return_episode_subgoals:
+        # convert episodes_subgoals to dict
+        episode_subgoals_dict = {i: 0 for i in range(max_subgoal + 1)}
+        for subgoal in episodes_subgoals:
+            # non-cumulative for 0
+            if subgoal == 0:
+                episode_subgoals_dict[0] += 1
+            # cumulative for others
+            else:
+                for i in range(subgoal + 1):
+                    episode_subgoals_dict[i] += 1
+
+        # normalize by number of episodes
+        for subgoal in episode_subgoals_dict:
+            episode_subgoals_dict[subgoal] /= n_eval_episodes
+
+        if return_episode_rewards:
+            return episode_rewards, episode_lengths, episode_subgoals_dict
+        return mean_reward, std_reward, episode_subgoals_dict
+
     if return_episode_rewards:
         return episode_rewards, episode_lengths
     return mean_reward, std_reward
