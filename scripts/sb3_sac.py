@@ -7,6 +7,7 @@ import mani_skill.envs
 import numpy as np
 import os
 from pathlib import Path
+import time
 import torch
 import wandb
 import gymnasium as gym
@@ -79,6 +80,7 @@ flags.DEFINE_string("experiment_name", None, "Name of the experiment.")
 flags.DEFINE_integer("seed", 22, "RNG seed.")
 flags.DEFINE_string("device", "cuda:0", "Device to use for training (e.g., 'cpu', 'cuda:0').")
 flags.DEFINE_boolean("wandb", False, "Log on W&B.")
+flags.DEFINE_boolean("no_progress_bar", False, "Disable training progress bar (useful when stdout->file).")
 
 config_flags.DEFINE_config_file(
     "config",
@@ -89,13 +91,26 @@ config_flags.DEFINE_config_file(
 
 class WandbCallback(BaseCallback):
     """Callback to log TensorBoard metrics to Weights & Biases."""
-    def __init__(self, exp_dir, verbose=0):
+    def __init__(self, exp_dir, log_freq, verbose=0):
         super().__init__(verbose)
         self.exp_dir = exp_dir
+        self.log_freq = log_freq
+        self.last_log_time = None
+        self.last_log_step = 0
 
     def _on_step(self) -> bool:
-        if self.num_timesteps % 1000 == 0:
-            metrics = {"train/timesteps": int(self.num_timesteps)}
+        if self.num_timesteps % self.log_freq == 0:
+            metrics = {}
+            
+            # Estimate remaining training time based on iteration speed
+            current_time = time.time()
+            if self.last_log_time is not None:
+                iter_per_sec = (self.num_timesteps - self.last_log_step) / (current_time - self.last_log_time + 1e-8)
+                remaining_time = (self.model._total_timesteps - self.num_timesteps) / (iter_per_sec + 1e-8)
+                metrics["train/remaining_time"] = float(remaining_time / 3600)  # convert to hours
+            self.last_log_time = current_time
+            self.last_log_step = self.num_timesteps
+            
             
             # Extract metrics from the model's logger if available
             try:
@@ -394,7 +409,7 @@ def main(_):
     # Setup callbacks
     callbacks = []
     if FLAGS.wandb:
-        callbacks.append(WandbCallback(exp_dir))
+        callbacks.append(WandbCallback(exp_dir, config.log_frequency))
     
     # Add periodic evaluation and save callback
     callbacks.append(
@@ -417,7 +432,7 @@ def main(_):
         model.learn(
             total_timesteps=int(config.num_train_steps),
             callback=callbacks,
-            progress_bar=True,
+            progress_bar=not FLAGS.no_progress_bar,
         )
     except KeyboardInterrupt:
         logging.info("Training interrupted by user.")

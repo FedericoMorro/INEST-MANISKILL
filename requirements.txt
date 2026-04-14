@@ -174,3 +174,4 @@ Werkzeug==3.0.6
 wrapt==1.12.1
 x-magical @ git+https://github.com/kevinzakka/x-magical.git@31fa989e2ecd6fcdbcdc6f9b70057ab28f6184f2
 zipp==3.20.2
+-e .

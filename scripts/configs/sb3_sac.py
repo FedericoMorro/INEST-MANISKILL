@@ -82,7 +82,7 @@ def get_config():
   config.sac.batch_size = 256
   config.sac.learnable_temperature = True
   config.sac.target_entropy = -3.5  # set to -|A| if None
-  config.sac.action_noise_std = None
+  config.sac.action_noise_std = 0.0
 
   # ================================================= #
   # Critic parameters.
