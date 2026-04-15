@@ -285,7 +285,7 @@ def wrap_learned_reward(env, config, device):
   """
   print("Wrapping environment with learned reward wrapper...")
   if config.reward_wrapper.type in ("env", "baseline", "environment"):
-    return wrappers.EnvironmentRewardBaselineWrapper(env)
+    return wrappers.EnvironmentRewardWrapper(env)
 
   pretrained_path = config.reward_wrapper.pretrained_path
   # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -518,7 +518,7 @@ def wrap_learned_reward_single(env, config, device, model, model_config):
   }
 
   if config.reward_wrapper.type == "env":
-    return wrappers.EnvironmentRewardBaselineWrapper(env)
+    return wrappers.EnvironmentRewardWrapper(env)
   
   if config.reward_wrapper.type == "goal_classifier":
     from sac.wrappers import GoalClassifierLearnedVisualReward

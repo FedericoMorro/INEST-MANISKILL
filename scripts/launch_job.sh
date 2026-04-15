@@ -5,7 +5,13 @@ export QUEUE_TIME
 
 mkdir -p ${HOME}/logs/${QUEUE_TIME}
 
-export EXPERIMENT_NAME="32_no-rng_v06"
+if [ $# -ne 2 ]; then
+    echo "Usage: $0 <script_name> <experiment_name>"
+    echo "Example: $0 inest 32_no-rng_v##"
+    exit 1
+fi
+
+export EXPERIMENT_NAME="$2"
 export RND_SEED="22"
 export REPLAY_BUFFER_CAPACITY="1_000_000"
 export ACTOR_LR="3e-4"
@@ -13,7 +19,7 @@ export CRITIC_LR="1e-4"
 export ALPHA_LR="3e-4"
 export TARGET_ENTROPY="-3.5"
 export STD_ACTION_NOISE="0.0"
-#export ANNEAL_TARGET_ENTROPY="0"
+export ANNEAL_TARGET_ENTROPY="False"
 
 if [[ "$1" == "inest" ]]; then
     echo "Submitting INEST MANISKILL RL training job..."

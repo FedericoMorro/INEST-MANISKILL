@@ -331,7 +331,7 @@ class VideoRecorder(gym.Wrapper):
     return observation, reward, done, info
 
 
-class EnvironmentRewardBaselineWrapper(gym.Wrapper):
+class EnvironmentRewardWrapper(gym.Wrapper):
     """Compatibility wrapper that keeps raw environment rewards.
 
     This wrapper preserves the step signature used by learned reward wrappers so

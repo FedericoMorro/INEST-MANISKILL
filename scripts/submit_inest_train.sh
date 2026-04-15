@@ -10,7 +10,7 @@ echo " Critic LR: $CRITIC_LR"
 echo " Alpha LR: $ALPHA_LR"
 echo " Target Entropy: $TARGET_ENTROPY"
 echo " Standard Action Noise: $STD_ACTION_NOISE"
-#echo " Anneal Target Entropy: $ANNEAL_TARGET_ENTROPY"
+echo " Anneal Target Entropy: $ANNEAL_TARGET_ENTROPY"
 echo "====================================="
 
 # Load necessary modules (adjust based on your cluster)
@@ -95,13 +95,13 @@ CMD="python /home/fmorro/INEST-MANISKILL/scripts/sb3_sac.py \
     --seed $RND_SEED \
     --wandb \
     --no_progress_bar \
-    --config.replay_buffer_capacity $REPLAY_BUFFER_CAPACITY \
-    --config.sac.actor_lr $ACTOR_LR \
-    --config.sac.critic_lr $CRITIC_LR \
-    --config.sac.alpha_lr $ALPHA_LR \
-    --config.sac.target_entropy $TARGET_ENTROPY \
-    --config.sac.action_noise_std $STD_ACTION_NOISE"
-#    --config.sac.anneal_target_entropy $ANNEAL_TARGET_ENTROPY"
+    --config.replay_buffer_capacity=$REPLAY_BUFFER_CAPACITY \
+    --config.sac.actor_lr=$ACTOR_LR \
+    --config.sac.critic_lr=$CRITIC_LR \
+    --config.sac.alpha_lr=$ALPHA_LR \
+    --config.sac.target_entropy=$TARGET_ENTROPY \
+    --config.sac.action_noise_std=$STD_ACTION_NOISE \
+    --config.sac.anneal_target_entropy=$ANNEAL_TARGET_ENTROPY"
 
 # Execute the command
 echo "Executing: $CMD"
