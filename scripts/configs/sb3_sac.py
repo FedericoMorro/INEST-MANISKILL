@@ -54,8 +54,8 @@ def get_config():
   config.num_train_steps = 30_000_000
   config.replay_buffer_capacity = 1_000_000
   config.num_seed_steps = 30_000
-  config.num_eval_episodes = 5 #150
-  config.eval_frequency = 10_000
+  config.num_eval_episodes = 50 #150
+  config.eval_frequency = 1_000_000
   config.checkpoint_frequency = 1_000_000
   config.log_frequency = 1_000 #20_000
   config.save_video = True
@@ -84,9 +84,9 @@ def get_config():
   config.sac.target_entropy = -3.5  # set to -|A| if None, if annealing it is the final value
   config.sac.action_noise_std = 0.0
 
-  config.sac.anneal_target_entropy = True
-  config.sac.start_entropy_anneal = 50_000
-  config.sac.end_entropy_anneal = 40_000_000
+  config.sac.anneal_target_entropy = False
+  config.sac.start_entropy_anneal = config.num_seed_steps
+  config.sac.end_entropy_anneal = 45_000_000
   config.initial_target_entropy = 0.0
 
   # ================================================= #

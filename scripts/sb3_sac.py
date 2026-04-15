@@ -228,8 +228,10 @@ class EvalSaveCallback(BaseCallback):
             os.makedirs(checkpoint_dir, exist_ok=True)
             
             # Save latest checkpoint
+            step_checkpoint_path = os.path.join(checkpoint_dir, f"{step}")
             latest_checkpoint_path = os.path.join(checkpoint_dir, "latest_model")
             try:
+                self.model.save(step_checkpoint_path)
                 self.model.save(latest_checkpoint_path)
                 if self.verbose >= 1:
                     logging.info(f"Saved latest model checkpoint at step {step}")

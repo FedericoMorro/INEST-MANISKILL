@@ -11,7 +11,9 @@ export REPLAY_BUFFER_CAPACITY="1_000_000"
 export ACTOR_LR="3e-4"
 export CRITIC_LR="1e-4"
 export ALPHA_LR="3e-4"
+export TARGET_ENTROPY="-3.5"
 export STD_ACTION_NOISE="0.0"
+#export ANNEAL_TARGET_ENTROPY="0"
 
 if [[ "$1" == "inest" ]]; then
     echo "Submitting INEST MANISKILL RL training job..."
@@ -31,15 +33,15 @@ if [[ "$1" == "inest" ]]; then
 
     sbatch --job-name=inest_maniskill_rl_training \
         --ntasks-per-node=1 \
-        --cpus-per-task=32 \
-        --mem=32GB \
+        --cpus-per-task=36 \
+        --mem=50GB \
         --mail-type=ALL \
         --mail-user=federico.morro@polito.it \
         --partition=gpu_a40 \
         --gres=gpu:1 \
         --output=${HOME}/logs/${QUEUE_TIME}/inest_maniskill_rl_training_%j.out \
         --error=${HOME}/logs/${QUEUE_TIME}/inest_maniskill_rl_training_%j.err \
-        submit_inest_train.sh
+        /home/fmorro/INEST-MANISKILL/scripts/submit_inest_train.sh
 else
     echo "Unknown argument: $1. Please specify 'inest' to submit the INEST MANISKILL RL training job."
 fi

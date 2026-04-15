@@ -237,7 +237,7 @@ class SAC(OffPolicyAlgorithm):
                 # Anneal the target entropy if a function is provided
                 if self.target_entropy_anneal is not None:
                     self.target_entropy = self.target_entropy_anneal(self.num_timesteps)
-                    self.logger.record("train/target_entropy", self.target_entropy)
+                self.logger.record("train/target_entropy", self.target_entropy)
 
                 # Important: detach the variable from the graph
                 # so we don't change it with other losses

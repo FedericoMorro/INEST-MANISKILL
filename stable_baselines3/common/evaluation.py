@@ -159,7 +159,7 @@ def evaluate_policy(
                 episode_subgoals_dict[0] += 1
             # cumulative for others
             else:
-                for i in range(subgoal + 1):
+                for i in range(1, subgoal + 1):
                     episode_subgoals_dict[i] += 1
 
         # normalize by number of episodes
