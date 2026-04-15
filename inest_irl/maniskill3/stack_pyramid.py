@@ -235,20 +235,19 @@ class StackPyramidEnv(BaseEnv):
             return torch.norm(a - b) < eps
 
         curr_cubeA_pos = self.cubeA.pose.p
-        curr_cubeB_pos = self.cubeB.pose.p
         curr_cubeC_pos = self.cubeC.pose.p
 
         # detect subgoal transitions based on cube position changes and success conditions
-        if self.curr_subgoal == 0 and not _is_equal_tensor(curr_cubeA_pos, self.prev_cubeA_pos):   # pose changed from init
+        if self.curr_subgoal == 0 and not _is_equal_tensor(curr_cubeA_pos, self.prev_cubeA_pos):    # pose changed from init
             self.curr_subgoal = 1
 
-        elif self.curr_subgoal == 1 and (_is_equal_tensor(curr_cubeA_pos, self.prev_cubeA_pos)     # cubeA stopped moving after moving
-                and self._success_per_cubes("A_B")):        # and success A_B (A next to B)
+        elif self.curr_subgoal == 1 and (_is_equal_tensor(curr_cubeA_pos, self.prev_cubeA_pos)      # cubeA stopped moving after moving
+                and self._success_per_cubes("A_B")):            # and success A_B (A next to B)
             self.curr_subgoal = 2
-            self.prev_cubeC_pos = curr_cubeC_pos
 
-        elif self.curr_subgoal == 2 and not _is_equal_tensor(curr_cubeC_pos, self.prev_cubeC_pos): # pose changed from init
+        elif self.curr_subgoal == 2 and self.agent.is_grasping(self.cubeC):        # cubeC is grasped by the robot
             self.curr_subgoal = 3
+            self.prev_cubeC_pos = self.cubeC.pose.p   # initialize prev_cubeC_pos to check when it stops moving in the next step
 
         elif self.curr_subgoal == 3 and (_is_equal_tensor(curr_cubeC_pos, self.prev_cubeC_pos)     # cubeC stopped moving after moving
                 and self._success_per_cubes("C_B") and self._success_per_cubes("C_A")):        #  and success C_B and success C_A (C on top of A and B)
