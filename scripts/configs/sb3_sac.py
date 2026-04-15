@@ -70,12 +70,12 @@ def get_config():
   config.sac.action_range = action_range
   config.sac.discount = 0.995
   config.sac.init_temperature = 1.0
-  config.sac.alpha_lr = 1e-4
+  config.sac.alpha_lr = 3e-4
   config.sac.alpha_betas = [0.9, 0.999]
-  config.sac.actor_lr = 1e-4
+  config.sac.actor_lr = 3e-4
   config.sac.actor_betas = [0.9, 0.999]
   config.sac.actor_update_frequency = 1
-  config.sac.critic_lr = 3e-5
+  config.sac.critic_lr = 1e-4
   config.sac.critic_betas = [0.9, 0.999]
   config.sac.critic_tau = 0.005
   config.sac.critic_target_update_frequency = 2
@@ -86,7 +86,7 @@ def get_config():
 
   config.sac.anneal_target_entropy = False
   config.sac.start_entropy_anneal = config.num_seed_steps
-  config.sac.end_entropy_anneal = 45_000_000
+  config.sac.end_entropy_anneal = 25_000_000
   config.initial_target_entropy = 0.0
 
   # ================================================= #

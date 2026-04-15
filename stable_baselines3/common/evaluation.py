@@ -83,7 +83,7 @@ def evaluate_policy(
     episode_lengths = []
 
     if return_episode_subgoals:
-        episodes_subgoals = [0] * n_eval_episodes
+        episodes_subgoals = []
         max_subgoal = env.get_attr("max_subgoal", 0)[0]
 
     episode_counts = np.zeros(n_envs, dtype="int")
@@ -113,9 +113,6 @@ def evaluate_policy(
                 info = infos[i]
                 episode_starts[i] = done
 
-                if return_episode_subgoals:
-                    episodes_subgoals[i] = info.get("subgoal", episodes_subgoals[i])
-
                 if callback is not None:
                     callback(locals(), globals())
 
@@ -132,10 +129,18 @@ def evaluate_policy(
                             episode_lengths.append(info["episode"]["l"])
                             # Only increment at the real end of an episode
                             episode_counts[i] += 1
+
+                            if return_episode_subgoals:
+                                episodes_subgoals.append(info.get("subgoal", 0))
+                                
                     else:
                         episode_rewards.append(current_rewards[i])
                         episode_lengths.append(current_lengths[i])
                         episode_counts[i] += 1
+
+                        if return_episode_subgoals:
+                            episodes_subgoals.append(info.get("subgoal", 0))
+
                     current_rewards[i] = 0
                     current_lengths[i] = 0
 

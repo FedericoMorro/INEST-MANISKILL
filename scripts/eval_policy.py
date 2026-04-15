@@ -1,5 +1,6 @@
-from absl import app, flags, logging
+import argparse
 import json
+import logging
 import matplotlib.pyplot as plt
 import mani_skill.envs
 import numpy as np
@@ -15,13 +16,9 @@ from stable_baselines3 import SAC
 
 from inest_irl.utils import utils
 
-FLAGS = flags.FLAGS
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-flags.DEFINE_string("checkpoint_dir", None, "Path to checkpoint directory (required).")
-flags.DEFINE_string("config_path", "/home/fmorro/INEST-MANISKILL/scripts/configs/sb3_sac.py", "Path to the configuration file.")
-flags.DEFINE_integer("num_episodes", 10, "Number of evaluation episodes.")
-flags.DEFINE_boolean("save_video", True, "Whether to save video recordings.")
-flags.DEFINE_string("device", "cpu", "Device to use (e.g., 'cpu', 'cuda:0').")
 
 HORIZON = 100
 DETERMINISTIC = True
@@ -161,15 +158,18 @@ def _save_video(video_path, frames, fps=10):
         import traceback
         traceback.print_exc()
 
-def _save_reward_plot(plot_path, step_rewards):
+def _save_reward_plot(plot_path, step_rewards, subgoal_idxs=None):
     """Save reward curve plot as PNG with per-step and cumulative plots."""
     try:
         plt.figure(figsize=FIGSIZE_TRAJ)
         
         # Rewards with average line
         plt.plot(step_rewards, linewidth=2, color='steelblue', label='Reward')
-        plt.axhline(np.mean(step_rewards), color='red', linestyle=':', linewidth=2, 
+        plt.axhline(np.mean(step_rewards), color='green', linestyle=':', linewidth=2, alpha=0.7,
                     label=f'Avg: {np.mean(step_rewards):.2f}')
+        if subgoal_idxs:
+            for idx in subgoal_idxs:
+                plt.axvline(idx, color='red', linestyle='--', alpha=0.7, label='Subgoal(s)' if idx == subgoal_idxs[0] else "")
         plt.xlabel('Step', fontsize=FS_LABEL)
         plt.ylabel('Reward', fontsize=FS_LABEL)
         plt.title('Reward', fontsize=FS_TITLE, fontweight='bold')
@@ -183,7 +183,7 @@ def _save_reward_plot(plot_path, step_rewards):
     except Exception as e:
         logging.error(f"Error saving reward plot {plot_path}: {e}")
 
-def _run_episode(model, env, video_path=None):
+def _run_episode(model, env, video_path=None, save_video=True):
     """Run single evaluation episode manually, optionally recording video."""
     reset_result = env.reset()
     if isinstance(reset_result, tuple):
@@ -196,6 +196,7 @@ def _run_episode(model, env, video_path=None):
     episode_reward = 0.0
     step_rewards = []
     frames = []
+    subgoal_idxs = []
     
     while step_count < HORIZON:
         action, _ = model.predict(obs, deterministic=DETERMINISTIC)
@@ -204,16 +205,21 @@ def _run_episode(model, env, video_path=None):
         if len(step_result) == 5:
             obs, reward, terminated, truncated, info = step_result
         else:
-            obs, reward, terminated, truncated = step_result
+            obs, reward, terminated, info = step_result
+            truncated = False
         
         reward = float(reward)
         episode_reward += reward
         step_rewards.append(reward)
         step_count += 1
         done = terminated or truncated
+
+        curr_subgoal = info.get("subgoal", None)
+        if curr_subgoal is not None and curr_subgoal > len(subgoal_idxs):
+            subgoal_idxs.append(step_count)
         
         # Render frame if video saving enabled
-        if FLAGS.save_video:
+        if save_video:
             try:
                 frame = safe_render(env, mode="rgb_array")
                 if frame is not None:
@@ -225,119 +231,7 @@ def _run_episode(model, env, video_path=None):
     if video_path and frames:
         _save_video(video_path, frames)
     
-    return episode_reward, step_count, len(frames), step_rewards
-
-
-def main(_):
-    # Validate checkpoint path
-    if not FLAGS.checkpoint_dir:
-        raise ValueError("--checkpoint_dir is required")
-    if not os.path.exists(FLAGS.checkpoint_dir):
-        raise FileNotFoundError(f"Checkpoint not found: {FLAGS.checkpoint_dir}")
-
-    # Setup device
-    if torch.cuda.is_available():
-        device = torch.device(FLAGS.device)
-    else:
-        logging.warning("No GPU found, using CPU")
-        device = torch.device("cpu")
-    logging.info(f"Using device: {device}")
-
-    # Load configuration
-    import importlib.util
-    spec = importlib.util.spec_from_file_location("config", FLAGS.config_path)
-    config_module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(config_module)
-    config = config_module.get_config() if hasattr(config_module, 'get_config') else config_module.config
-
-    # Create evaluation environment
-    logging.info(f"Creating environment: {config.env_name}")
-    eval_env = utils.make_env(
-        config.env_name,
-        seed=42,
-        action_repeat=config.action_repeat,
-        frame_stack=config.frame_stack,
-    )
-    
-    # Patch render compatibility in the wrapper chain
-    eval_env = patch_env_render_compatibility(eval_env)
-
-    # Load model
-    logging.info(f"Loading checkpoint from {FLAGS.checkpoint_dir}...")
-    model = SAC.load(FLAGS.checkpoint_dir, device=device)
-
-    # Create output directories
-    checkpoint_dir = os.path.dirname(FLAGS.checkpoint_dir)
-    results_dir = os.path.join(checkpoint_dir, "eval_results")
-    traj_dir = os.path.join(results_dir, "trajs") if FLAGS.save_video else None
-    if traj_dir:
-        os.makedirs(traj_dir, exist_ok=True)
-    os.makedirs(results_dir, exist_ok=True)
-
-    # Run evaluation episodes manually
-    logging.info(f"Running {FLAGS.num_episodes} evaluation episodes...")
-    rewards = []
-    lengths = []
-    frame_counts = []
-
-    for episode_num in range(FLAGS.num_episodes):
-        video_path = None
-        if FLAGS.save_video and traj_dir:
-            video_path = os.path.join(traj_dir, f"{episode_num}.mp4")
-        
-        episode_reward, episode_length, frame_count, step_rewards = _run_episode(model, eval_env, video_path)
-        rewards.append(episode_reward)
-        lengths.append(episode_length)
-        frame_counts.append(frame_count)
-        
-        # Save reward curve plot
-        if FLAGS.save_video and traj_dir:
-            plot_path = os.path.join(traj_dir, f"{episode_num}.png")
-            _save_reward_plot(plot_path, step_rewards)
-        
-        logging.info(f"Episode {episode_num}: reward={episode_reward:.4f}, length={episode_length}, frames={frame_count}")
-
-    # Compute statistics
-    mean_reward = float(np.mean(rewards))
-    std_reward = float(np.std(rewards))
-    mean_length = float(np.mean(lengths))
-    std_length = float(np.std(lengths))
-
-    # Log results
-    logging.info("=" * 50)
-    logging.info("Evaluation Results")
-    logging.info("=" * 50)
-    logging.info(f"Mean Reward: {mean_reward:.4f} ± {std_reward:.4f}")
-    logging.info(f"Mean Episode Length: {mean_length:.2f} ± {std_length:.2f}")
-    logging.info(f"Min Reward: {np.min(rewards):.4f}")
-    logging.info(f"Max Reward: {np.max(rewards):.4f}")
-    if traj_dir:
-        logging.info(f"Trajectories saved to: {traj_dir}")
-    logging.info("=" * 50)
-
-    # Save results to JSON
-    results = {
-        "mean_reward": mean_reward,
-        "std_reward": std_reward,
-        "mean_length": mean_length,
-        "std_length": std_length,
-        "min_reward": float(np.min(rewards)),
-        "max_reward": float(np.max(rewards)),
-        "individual_rewards": rewards,
-        "episode_lengths": lengths,
-        "frame_counts": frame_counts,
-    }
-    
-    results_path = os.path.join(results_dir, "results.json")
-    with open(results_path, "w") as f:
-        json.dump(results, f, indent=2)
-    logging.info(f"Results saved to {results_path}")
-
-    # Create plots
-    _create_plots(results, results_dir)
-
-    eval_env.close()
-    logging.info("Evaluation complete!")
+    return episode_reward, step_count, len(frames), step_rewards, subgoal_idxs
 
 
 def _create_plots(results, output_dir):
@@ -381,5 +275,140 @@ def _create_plots(results, output_dir):
     plt.close()
 
 
+def main():
+    parser = argparse.ArgumentParser(description="Evaluate trained RL policy")
+    parser.add_argument("model_path", type=str, help="Path to the trained model checkpoint")
+    parser.add_argument("--config_path", type=str, 
+                        default="/home/fmorro/INEST-MANISKILL/scripts/configs/sb3_sac.py",
+                        help="Path to the configuration file")
+    parser.add_argument("--num_episodes", type=int, default=10,
+                        help="Number of evaluation episodes")
+    parser.add_argument("--save_video", action="store_true", default=True,
+                        help="Whether to save video recordings")
+    parser.add_argument("--no_save_video", action="store_false", dest="save_video",
+                        help="Disable video recording")
+    parser.add_argument("--device", type=str, default="cpu",
+                        help="Device to use (e.g., 'cpu', 'cuda:0')")
+    
+    args = parser.parse_args()
+    
+    # Validate checkpoint path
+    if not args.model_path:
+        raise ValueError("model_path is required")
+    
+    checkpoint_dir = args.model_path
+    if not os.path.exists(checkpoint_dir):
+        raise FileNotFoundError(f"Checkpoint not found: {checkpoint_dir}")
+
+    # Setup device
+    if torch.cuda.is_available():
+        device = torch.device(args.device)
+    else:
+        logging.warning("No GPU found, using CPU")
+        device = torch.device("cpu")
+    logging.info(f"Using device: {device}")
+
+    # Load configuration
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("config", args.config_path)
+    config_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(config_module)
+    config = config_module.get_config() if hasattr(config_module, 'get_config') else config_module.config
+
+    # Create evaluation environment
+    logging.info(f"Creating environment: {config.env_name}")
+    eval_env = utils.make_env(
+        config.env_name,
+        seed=42,
+        action_repeat=config.action_repeat,
+        frame_stack=config.frame_stack,
+    )
+    
+    # Patch render compatibility in the wrapper chain
+    eval_env = patch_env_render_compatibility(eval_env)
+
+    # Load model
+    logging.info(f"Loading checkpoint from {checkpoint_dir}...")
+    model = SAC.load(checkpoint_dir, device=device)
+
+    # Create output directories
+    parent_dir = os.path.dirname(checkpoint_dir)
+    results_dir = os.path.join(parent_dir, "eval_results")
+    traj_dir = os.path.join(results_dir, "trajs") if args.save_video else None
+    if traj_dir:
+        os.makedirs(traj_dir, exist_ok=True)
+    os.makedirs(results_dir, exist_ok=True)
+
+    # Run evaluation episodes manually
+    logging.info(f"Running {args.num_episodes} evaluation episodes...")
+    rewards = []
+    lengths = []
+    frame_counts = []
+    subgoal_idxs_all = []
+
+    for episode_num in range(args.num_episodes):
+        video_path = None
+        if args.save_video and traj_dir:
+            video_path = os.path.join(traj_dir, f"{episode_num}.mp4")
+        
+        episode_reward, episode_length, frame_count, step_rewards, subgoal_idxs = _run_episode(
+            model, eval_env, video_path, save_video=args.save_video
+        )
+        rewards.append(episode_reward)
+        lengths.append(episode_length)
+        frame_counts.append(frame_count)
+        subgoal_idxs_all.append(subgoal_idxs)
+        
+        # Save reward curve plot
+        if args.save_video and traj_dir:
+            plot_path = os.path.join(traj_dir, f"{episode_num}.png")
+            _save_reward_plot(plot_path, step_rewards, subgoal_idxs)
+        
+        logging.info(f"Episode {episode_num}: reward={episode_reward:.4f}, length={episode_length}, frames={frame_count}, subgoal={len(subgoal_idxs)}")
+
+    # Compute statistics
+    mean_reward = float(np.mean(rewards))
+    std_reward = float(np.std(rewards))
+    mean_length = float(np.mean(lengths))
+    std_length = float(np.std(lengths))
+
+    # Log results
+    logging.info("=" * 50)
+    logging.info("Evaluation Results")
+    logging.info("=" * 50)
+    logging.info(f"Mean Reward: {mean_reward:.4f} ± {std_reward:.4f}")
+    logging.info(f"Mean Episode Length: {mean_length:.2f} ± {std_length:.2f}")
+    logging.info(f"Min Reward: {np.min(rewards):.4f}")
+    logging.info(f"Max Reward: {np.max(rewards):.4f}")
+    if traj_dir:
+        logging.info(f"Trajectories saved to: {traj_dir}")
+    logging.info("=" * 50)
+
+    # Save results to JSON
+    results = {
+        "mean_reward": mean_reward,
+        "std_reward": std_reward,
+        "mean_length": mean_length,
+        "std_length": std_length,
+        "min_reward": float(np.min(rewards)),
+        "max_reward": float(np.max(rewards)),
+        "individual_rewards": rewards,
+        "episode_lengths": lengths,
+        "frame_counts": frame_counts,
+        "subgoal_idxs": subgoal_idxs_all
+    }
+    
+    results_path = os.path.join(results_dir, "results.json")
+    with open(results_path, "w") as f:
+        json.dump(results, f, indent=2)
+    logging.info(f"Results saved to {results_path}")
+
+    # Create plots
+    _create_plots(results, results_dir)
+
+    eval_env.close()
+    logging.info("Evaluation complete!")
+
+
 if __name__ == "__main__":
-    app.run(main)
+    main()
