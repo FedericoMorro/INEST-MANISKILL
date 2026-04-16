@@ -26,6 +26,7 @@ from mani_skill.utils.structs.pose import Pose
 
 
 HORIZON = 100
+ENFORCE_FULL_EPISODES = True
 DEFAULT_RANDOMIZE_CUBES = False
 
 
@@ -293,6 +294,10 @@ class StackPyramidEnv(BaseEnv):
         self._update_subgoal_success()
         info["subgoal"] = self.curr_subgoal
 
+        if ENFORCE_FULL_EPISODES:
+            terminated = torch.tensor([False], device=self.device)
+            truncated = torch.tensor([False], device=self.device)
+            
         return obs, reward, terminated, truncated, info
 
 

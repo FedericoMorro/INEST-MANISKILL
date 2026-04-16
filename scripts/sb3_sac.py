@@ -71,13 +71,26 @@ class WandbCallback(BaseCallback):
             except Exception:
                 pass
 
-            # Extract rollout stats from ep_info_buffer
+            # Extract rollout stats from ep_info_buffer and ep_success_buffer if available
             try:
                 if hasattr(self.model, 'ep_info_buffer') and len(self.model.ep_info_buffer) > 0:
                     rewards = [ep_info["r"] for ep_info in self.model.ep_info_buffer]
                     lengths = [ep_info["l"] for ep_info in self.model.ep_info_buffer]
                     metrics['rollout/ep_rew_mean'] = float(np.mean(rewards))
                     metrics['rollout/ep_len_mean'] = float(np.mean(lengths))
+                    if hasattr(self.model, 'ep_success_buffer') and len(self.model.ep_success_buffer) > 0:
+                        successes = [float(s) for s in self.model.ep_success_buffer]
+                        metrics['rollout/ep_success_mean'] = float(np.mean(successes))
+                    else:
+                        metrics['rollout/ep_success_mean'] = float(0)
+            except Exception:
+                pass
+
+            # Extract time logs from model if available
+            try:
+                if hasattr(self.model, 'log_time_buffer'):
+                    for key, value in self.model.log_time_buffer.items():
+                        metrics[key] = float(value)
             except Exception:
                 pass
 

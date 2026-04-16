@@ -3,7 +3,9 @@
 ## Modifications
 1. Added support for target entropy annealing in SAC.
 2. Added support for returning episode subgoals during evaluation.
+3. Log rollout metrics to W&B.
 
 ## Edited Files
 - `sac/sac.py`: 1
 - `common/evaluation.py`: 2
+- `common/off_policy_algorithm.py`: 3

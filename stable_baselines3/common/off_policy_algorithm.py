@@ -435,6 +435,15 @@ class OffPolicyAlgorithm(BaseAlgorithm):
 
         if len(self.ep_success_buffer) > 0:
             self.logger.record("rollout/success_rate", safe_mean(self.ep_success_buffer))
+
+        # add time logs to item to be taken and logged to wandb
+        self.log_time_buffer = {
+            "time/episodes": self._episode_num,
+            "time/fps": fps,
+            "time/time_elapsed": int(time_elapsed),
+            "time/total_timesteps": self.num_timesteps,
+        }
+        
         # Pass the number of timesteps for tensorboard
         self.logger.dump(step=self.num_timesteps)
 
