@@ -56,6 +56,7 @@ class StackPyramidEnv(BaseEnv):
     def __init__(
         self,
         *args,
+        env_reward_type="sparse",
         robot_uids="panda_wristcam",
         robot_init_qpos_noise=0.02,
         randomize_cubes=DEFAULT_RANDOMIZE_CUBES,
@@ -64,7 +65,7 @@ class StackPyramidEnv(BaseEnv):
         print("Initializing custom StackPyramid environment")
         self.robot_init_qpos_noise = robot_init_qpos_noise
         self.randomize_cubes = randomize_cubes
-        kwargs["reward_mode"] = "normalized_dense"
+        kwargs["reward_mode"] = env_reward_type
         self.max_subgoal = 4
         super().__init__(*args, robot_uids=robot_uids, **kwargs)
 

@@ -19,6 +19,7 @@ from stable_baselines3.common.evaluation import evaluate_policy
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.noise import NormalActionNoise, VectorizedActionNoise
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecMonitor
+from stable_baselines3.her.her_replay_buffer import HerReplayBuffer
 
 from inest_irl.utils import utils
 
@@ -251,13 +252,15 @@ class EvalSaveCallback(BaseCallback):
         return True
 
 
-def _make_env_wrapper(env_name, seed, action_repeat, frame_stack):
+def _make_env_wrapper(env_name, seed, reward_wrapper_type, action_repeat, frame_stack):
     """Factory function for creating environments in subprocesses."""
     env = utils.make_env(
         env_name,
         seed=seed,
+        env_reward_type="dense_normalized" if reward_wrapper_type == "env" else "sparse",
         action_repeat=action_repeat,
         frame_stack=frame_stack,
+        obs_mode="state" if reward_wrapper_type != "sparse" else "state_dict",
     )
     return GymCompatibilityWrapper(env)
 
@@ -313,6 +316,7 @@ def main(_):
     action_repeat = copy.deepcopy(config.action_repeat)
     frame_stack = copy.deepcopy(config.frame_stack)
     base_seed = copy.deepcopy(FLAGS.seed)
+    reward_wrapper_type = copy.deepcopy(config.reward_wrapper.type)
 
     # Load environments
     logging.info(f"Creating {config.num_envs} environment(s)...")
@@ -320,7 +324,7 @@ def main(_):
     if config.num_envs > 1:
         # Multiple parallel environments - pass factory function with partial args
         env_fns = [
-            functools.partial(_make_env_wrapper, env_name, base_seed + i, action_repeat, frame_stack)
+            functools.partial(_make_env_wrapper, env_name, base_seed + i, reward_wrapper_type, action_repeat, frame_stack)
             for i in range(config.num_envs)
         ]
         env = SubprocVecEnv(env_fns)
@@ -328,7 +332,7 @@ def main(_):
         env = VecMonitor(env, os.path.join(exp_dir, "train_monitor"))
     else:
         # Single environment
-        env = _make_env_wrapper(env_name, base_seed, action_repeat, frame_stack)
+        env = _make_env_wrapper(env_name, base_seed, reward_wrapper_type, action_repeat, frame_stack)
         # Wrap with Monitor for episode statistics
         env = Monitor(env, os.path.join(exp_dir, "train_monitor"))
     
@@ -407,6 +411,7 @@ def main(_):
         device=device,
         verbose=1,
         target_entropy_anneal=target_entropy_anneal if config.sac.anneal_target_entropy else None,
+        replay_buffer_class=None if config.reward_wrapper.type != "sparse" else HerReplayBuffer,
     )
 
     # Override optimizers with component-specific learning rates and betas

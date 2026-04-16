@@ -17,6 +17,7 @@ export REPLAY_BUFFER_CAPACITY="1_000_000"
 export ACTOR_LR="3e-4"
 export CRITIC_LR="1e-4"
 export ALPHA_LR="3e-4"
+export DISCOUNT="0.995"
 export TARGET_ENTROPY="-3.5"
 export STD_ACTION_NOISE="0.0"
 export ANNEAL_TARGET_ENTROPY="False"
@@ -39,8 +40,8 @@ if [[ "$1" == "inest" ]]; then
 
     sbatch --job-name=inest_maniskill_rl_training \
         --ntasks-per-node=1 \
-        --cpus-per-task=36 \
-        --mem=50GB \
+        --cpus-per-task=32 \
+        --mem=32GB \
         --mail-type=ALL \
         --mail-user=federico.morro@polito.it \
         --partition=gpu_a40 \

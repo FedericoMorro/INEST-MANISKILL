@@ -8,6 +8,7 @@ echo " Replay Buffer Capacity: $REPLAY_BUFFER_CAPACITY"
 echo " Actor LR: $ACTOR_LR"
 echo " Critic LR: $CRITIC_LR"
 echo " Alpha LR: $ALPHA_LR"
+echo " Discount: $DISCOUNT"
 echo " Target Entropy: $TARGET_ENTROPY"
 echo " Standard Action Noise: $STD_ACTION_NOISE"
 echo " Anneal Target Entropy: $ANNEAL_TARGET_ENTROPY"
@@ -99,6 +100,7 @@ CMD="python /home/fmorro/INEST-MANISKILL/scripts/sb3_sac.py \
     --config.sac.actor_lr=$ACTOR_LR \
     --config.sac.critic_lr=$CRITIC_LR \
     --config.sac.alpha_lr=$ALPHA_LR \
+    --config.sac.discount=$DISCOUNT \
     --config.sac.target_entropy=$TARGET_ENTROPY \
     --config.sac.action_noise_std=$STD_ACTION_NOISE \
     --config.sac.anneal_target_entropy=$ANNEAL_TARGET_ENTROPY"

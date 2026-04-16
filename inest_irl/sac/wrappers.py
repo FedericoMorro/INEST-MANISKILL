@@ -338,9 +338,9 @@ class EnvironmentRewardWrapper(gym.Wrapper):
     training/evaluation code can stay unchanged across reward modes.
     """
 
-    def __init__(self, env):
+    def __init__(self, env, index_seed_step=0):
         super().__init__(env)
-        self.index_seed_step = 0
+        self.index_seed_step = index_seed_step
 
     def step(self, action, rank=None, exp_dir=None, flag="train"):
         del rank, exp_dir, flag  # Interface compatibility with learned wrappers.
@@ -378,6 +378,429 @@ class EnvironmentRewardWrapper(gym.Wrapper):
         with open(filepath, "w") as f:
             import json
             json.dump(payload, f, indent=2)
+
+
+class StateIntrinsicEnvironmentRewardWrapper(EnvironmentRewardWrapper):
+    """Compatibility wrapper that adds a state-based intrinsic reward to the environment reward."""
+    def __init__(
+        self,
+        index_seed_step = 0,
+        intrinsic_scale=0.2,
+        k_nearest=10,
+        max_memory=5_000,
+        coverage_grid_size=100,
+        **base_kwargs,
+    ):
+        super().__init__(**base_kwargs)
+        
+        self.index_seed_step = index_seed_step
+
+        # intrinsic reward parameters
+        self._intrinsic_scale = intrinsic_scale
+        self._k_nearest = k_nearest
+        self._max_memory = max_memory
+        self._state_memory = []
+        
+        # coverage tracking attributes
+        self._coverage_grid_size = coverage_grid_size
+        self._coverage_grid = None
+        self._visited_states = set()
+        self._total_steps = 0
+        
+        # similarity-preserving grid mapping
+        self._use_similarity_grid = True
+        self._grid_dims = 2  # use 2D grid for better visualization
+        self._embedding_buffer = []
+        self._buffer_size = 1000  # collect embeddings before computing mapping
+        self._similarity_mapping_fitted = False
+        self._embedding_mean = None
+        self._projection_matrix = None
+        
+        # coverage metrics storage
+        self._coverage_history = []
+        self._novelty_history = []
+        
+        self._norm_fitted = False
+
+    def _initialize_coverage_grid(self, embedding_dim):
+        """Initialize coverage tracking structures based on embedding dimension"""
+        self._embedding_dim = embedding_dim
+        
+        if self._use_similarity_grid:
+            # use 2D grid for similarity-preserving mapping
+            self._coverage_grid = np.zeros([self._coverage_grid_size, self._coverage_grid_size])
+            print(f"WRAPPER: Initialized 2D similarity-preserving coverage grid {self._coverage_grid.shape} for embedding dim {embedding_dim}")
+        else:
+            # fallback: use coordinate-wise mapping with limited dimensions
+            grid_dims = min(embedding_dim, 3)
+            self._coverage_grid = np.zeros([self._coverage_grid_size] * grid_dims)
+            print(f"WRAPPER: Initialized coordinate-wise coverage grid {self._coverage_grid.shape} for embedding dim {embedding_dim}")
+    
+    def _fit_similarity_mapping(self):
+        """Fit a PCA-like mapping to preserve embedding similarities in 2D grid"""
+        if len(self._embedding_buffer) < min(self._buffer_size, 100):
+            return False
+            
+        try:
+            embeddings = np.array(self._embedding_buffer)
+            print(f"WRAPPER: Fitting similarity mapping on {len(embeddings)} embeddings of dim {embeddings.shape[1]}")
+            
+            # center the embeddings
+            self._embedding_mean = embeddings.mean(axis=0)
+            centered = embeddings - self._embedding_mean
+            
+            # compute covariance matrix
+            cov_matrix = np.cov(centered.T)
+            
+            # eigendecomposition for PCA
+            eigenvals, eigenvecs = np.linalg.eigh(cov_matrix)
+            
+            # sort by eigenvalues (descending)
+            idx = eigenvals.argsort()[::-1]
+            eigenvals = eigenvals[idx]
+            eigenvecs = eigenvecs[:, idx]
+            
+            # keep top 2 components for 2D grid mapping
+            self._projection_matrix = eigenvecs[:, :self._grid_dims]
+            
+            # project all embeddings to get the bounds for normalization
+            projected = centered @ self._projection_matrix
+            self._projection_min = projected.min(axis=0)
+            self._projection_max = projected.max(axis=0)
+            
+            # calculate explained variance
+            explained_variance = eigenvals[:self._grid_dims].sum() / eigenvals.sum()
+            print(f"WRAPPER: Similarity mapping fitted. Explained variance: {explained_variance:.3f}")
+            print(f"WRAPPER: Projection bounds: min={self._projection_min}, max={self._projection_max}")
+            
+            self._similarity_mapping_fitted = True
+            return True
+            
+        except Exception as e:
+            print(f"WRAPPER ERROR: Failed to fit similarity mapping: {e}")
+            self._use_similarity_grid = False
+            return False
+        
+    def _fit_running_stats(self, emb):
+        if not self._norm_fitted:
+            self._running_min = emb.copy()
+            self._running_max = emb.copy()
+            self._norm_fitted = True
+        else:
+            self._running_min = np.minimum(self._running_min, emb)
+            self._running_max = np.maximum(self._running_max, emb)
+
+    def _get_grid_coordinates(self, embedding):
+        if self._embedding_dim is None:
+            self._initialize_coverage_grid(len(embedding))
+        
+        if self._use_similarity_grid:
+            return self._get_similarity_grid_coordinates(embedding)
+        else:
+            return self._get_coordinate_wise_grid_coordinates(embedding)
+    
+    def _get_similarity_grid_coordinates(self, embedding):
+        """Map embedding to 2D grid coordinates preserving similarity structure"""
+        # collect embeddings for fitting the similarity mapping
+        if not self._similarity_mapping_fitted:
+            self._embedding_buffer.append(embedding.copy())
+            if len(self._embedding_buffer) >= min(self._buffer_size, 1000):
+                fitted = self._fit_similarity_mapping()
+                if not fitted:
+                    return self._get_coordinate_wise_grid_coordinates(embedding)
+            else:
+                # use fallback until we have enough data
+                return self._get_coordinate_wise_grid_coordinates(embedding)
+        
+        try:
+            # project embedding to 2D space using fitted PCA
+            centered = embedding - self._embedding_mean
+            projected = centered @ self._projection_matrix
+            
+            # normalize to [0, 1] using fitted bounds with some margin
+            margin = 0.1 * (self._projection_max - self._projection_min)
+            extended_min = self._projection_min - margin
+            extended_max = self._projection_max + margin
+            
+            normalized = (projected - extended_min) / (extended_max - extended_min + 1e-8)
+            normalized = np.clip(normalized, 0.0, 1.0)
+            
+            # convert to grid coordinates
+            coords = (normalized * (self._coverage_grid_size - 1)).astype(int)
+            coords = np.clip(coords, 0, self._coverage_grid_size - 1)
+            
+            return tuple(int(coords.flatten()[i]) for i in range(len(coords.flatten())))
+            
+        except Exception as e:
+            print(f"WRAPPER WARNING: Similarity grid mapping failed: {e}")
+            return self._get_coordinate_wise_grid_coordinates(embedding)
+    
+    def _get_coordinate_wise_grid_coordinates(self, embedding):
+        """Fallback: simple coordinate-wise mapping"""
+        self._fit_running_stats(embedding)
+
+        denom = (self._running_max - self._running_min + 1e-6)
+        normalized = np.clip((embedding - self._running_min) / denom, 0.0, 1.0)
+        coords = (normalized * (self._coverage_grid_size - 1)).astype(int)
+        coords = np.clip(coords, 0, self._coverage_grid_size - 1)
+        
+        # match grid dimensions
+        grid_dims = len(self._coverage_grid.shape)
+        coord_tuple = tuple(int(coords.flatten()[i]) for i in range(min(len(coords.flatten()), grid_dims)))
+        
+        # pad with zeros if needed
+        if len(coord_tuple) < grid_dims:
+            coord_tuple = coord_tuple + (0,) * (grid_dims - len(coord_tuple))
+            
+        return coord_tuple
+
+    def _update_coverage_metrics(self, emb):
+        """Update various coverage metrics based on embedding"""
+        self._total_steps += 1
+        
+        # grid-based coverage
+        grid_coords = self._get_grid_coordinates(emb)
+        was_new_cell = False
+        
+        # ensure grid_coords is a valid index for the grid
+        try:
+            if self._coverage_grid[grid_coords] == 0:
+                self._coverage_grid[grid_coords] = 1
+                self._unique_states_visited += 1
+                was_new_cell = True
+        except (IndexError, ValueError) as e:
+            print(f"WRAPPER ERROR: Invalid grid coordinates {grid_coords} for grid shape {self._coverage_grid.shape}: {e}")
+            # fallback: don't update grid coverage for this step
+            pass
+        
+        # hash-based unique state counting (more precise)
+        rounded_emb = np.round(emb.flatten(), decimals=3)
+        state_hash = hash(tuple(rounded_emb.tolist()))
+
+        was_new_state = False
+        if state_hash not in self._visited_states:
+            self._visited_states.add(state_hash)
+            was_new_state = True
+            
+        self._visited_states.add(state_hash)
+        
+        # calculate current coverage metrics
+        grid_coverage = np.sum(self._coverage_grid > 0) / self._coverage_grid.size
+        unique_state_ratio = len(self._visited_states) / max(self._total_steps, 1)
+        
+        # debug print for first few steps
+        if self._total_steps <= 10:
+            print(f"WRAPPER DEBUG Step {self._total_steps}: "
+                  f"grid_coords={grid_coords}, was_new_cell={was_new_cell}, "
+                  f"grid_coverage={grid_coverage:.4f}, unique_states={len(self._visited_states)}, "
+                  f"similarity_fitted={self._similarity_mapping_fitted}")
+        
+        # periodic status updates
+        if self._total_steps % 5000 == 0:
+            print(f"WRAPPER STATUS Step {self._total_steps}: "
+                  f"Grid coverage: {grid_coverage:.1%}, "
+                  f"Unique states: {len(self._visited_states)}, "
+                  f"Similarity mapping: {'fitted' if self._similarity_mapping_fitted else 'not fitted'}")
+        
+        # store metrics
+        self._coverage_history.append({
+            'step': self._total_steps,
+            'grid_coverage': grid_coverage,
+            'unique_states': len(self._visited_states),
+            'unique_ratio': unique_state_ratio,
+            'total_grid_cells': np.sum(self._coverage_grid > 0)
+        })
+        
+    def _compute_intrinsic_reward_from_state(self, state):
+        """Compute intrinsic reward based on state novelty"""
+        
+        memory = self._state_memory
+        
+        if len(memory) >= self._max_memory:
+            memory.pop(0)
+        memory.append(state.copy())
+        
+        # if not enough samples yet → encourage exploration
+        if len(memory) <= self._k_nearest:
+            novelty_reward = 1.0
+        else:
+            # calculate state distance using L2 norm 
+            dists = [np.linalg.norm(state - mem) for mem in memory[:-1]]
+            kth = min(self._k_nearest, len(dists) - 1)
+            kth_dist = np.partition(dists, kth)[kth]
+            
+            novelty_reward = min(kth_dist, 10.0)
+
+        # track novelty history
+        self._novelty_history.append({
+            'step': self._total_steps,
+            'novelty_reward': float(novelty_reward),
+            'reward_type': 'state'
+        })
+
+        return novelty_reward
+
+
+    def get_coverage_stats(self):
+        """Get comprehensive coverage statistics"""
+        if not self._coverage_history:
+            return {}
+        
+        latest = self._coverage_history[-1]
+        
+        stats = {
+            'total_steps': self._total_steps,
+            'unique_states_visited': len(self._visited_states),
+            'grid_coverage_percentage': latest['grid_coverage'] * 100,
+            'unique_state_ratio': latest['unique_ratio'],
+            'similarity_mapping_fitted': self._similarity_mapping_fitted,
+            'using_similarity_grid': self._use_similarity_grid,
+        }
+        
+        # Add intrinsic reward stats
+        if hasattr(self, '_state_memory_per_subtask') and self._novelty_history:
+            state_rewards = [h['novelty_reward'] for h in self._novelty_history[-100:] 
+                            if h.get('reward_type') == 'state']
+            if state_rewards:
+                stats['average_state_novelty'] = np.mean(state_rewards)
+                stats['max_state_novelty'] = np.max(state_rewards)
+                stats['state_memory_size'] = sum(len(mem) for mem in self._state_memory_per_subtask.values())
+        
+        # Add grid shape information
+        if self._coverage_grid is not None:
+            stats['grid_shape'] = list(self._coverage_grid.shape)
+            stats['total_grid_cells'] = self._coverage_grid.size
+            stats['visited_grid_cells'] = int(np.sum(self._coverage_grid > 0))
+        
+        return stats
+    
+    def get_coverage_visualization_data(self):
+        """Get data for visualizing the coverage grid"""
+        if self._coverage_grid is None:
+            return None
+            
+        viz_data = {
+            'coverage_grid': self._coverage_grid.copy(),
+            'grid_shape': self._coverage_grid.shape,
+            'total_cells': self._coverage_grid.size,
+            'visited_cells': int(np.sum(self._coverage_grid > 0)),
+            'coverage_percentage': (np.sum(self._coverage_grid > 0) / self._coverage_grid.size) * 100,
+            'similarity_mapping_fitted': self._similarity_mapping_fitted,
+            'using_similarity_grid': self._use_similarity_grid,
+        }
+        
+        if self._similarity_mapping_fitted and hasattr(self, '_projection_matrix'):
+            viz_data['projection_bounds'] = {
+                'min': self._projection_min.tolist(),
+                'max': self._projection_max.tolist()
+            }
+            
+        return viz_data
+      
+    def save_coverage_data(self, filepath):
+        """Save coverage data for analysis"""
+        import json
+        import numpy as np
+
+        def _to_serializable(obj):
+            if isinstance(obj, (np.integer,)):
+                return int(obj)
+            elif isinstance(obj, (np.floating,)):
+                return float(obj)
+            elif isinstance(obj, (np.ndarray,)):
+                return obj.tolist()
+            return obj
+
+        def _clean_dict_list(dict_list):
+            return [{k: _to_serializable(v) for k, v in d.items()} for d in dict_list]
+
+        coverage_data = {
+            'coverage_history': _clean_dict_list(self._coverage_history),
+            'novelty_history': _clean_dict_list(self._novelty_history),
+            'stats': {k: _to_serializable(v) for k, v in self.get_coverage_stats().items()},
+            'visualization_data': {k: _to_serializable(v) for k, v in (self.get_coverage_visualization_data() or {}).items()},
+            'parameters': {
+                'k_nearest': int(self._k_nearest),
+                'intrinsic_scale': float(self._intrinsic_scale),
+                'max_memory': int(self._max_memory),
+                'coverage_grid_size': int(self._coverage_grid_size),
+                'use_similarity_grid': bool(self._use_similarity_grid),
+                'grid_dims': int(self._grid_dims) if hasattr(self, '_grid_dims') else 2,
+            }
+        }
+
+        with open(filepath, 'w') as f:
+            json.dump(coverage_data, f, indent=2)
+            
+        print(f"WRAPPER: Saved coverage data to {filepath}")
+        
+        # also save a simple coverage grid visualization file
+        if self._coverage_grid is not None:
+            grid_file = filepath.replace('.json', '_grid.npy')
+            np.save(grid_file, self._coverage_grid)
+            print(f"WRAPPER: Saved coverage grid to {grid_file}")
+        
+    def reset_state(self):
+        print("WRAPPER: Resetting state.")
+        self._state_memory = []
+        
+        # Optionally reset coverage tracking (uncomment if you want fresh coverage each episode)
+        # self._coverage_grid = np.zeros_like(self._coverage_grid) if self._coverage_grid is not None else None
+        # self._visited_states = set()
+        # self._visited_states_per_subtask = defaultdict(set)
+        # self._embedding_memory = []
+        # self._total_steps = 0
+        # self._unique_states_visited = 0
+        # print("WRAPPER: Also reset coverage tracking.")
+
+    def step(self, action, rank, exp_dir, flag):
+        obs, reward, done, info = self.env.step(action)
+        info['env_reward'] = reward
+        
+        # calculate intrinsic reward based on state
+        if flag == "train":
+            self._update_coverage_metrics(obs)
+            intrinsic_reward = self._compute_intrinsic_reward_from_state(obs)
+                
+            # combine env reward with intrinsic reward
+            final_reward = reward + self._intrinsic_scale * intrinsic_reward
+            info["intrinsic_reward"] = intrinsic_reward
+        else:
+            final_reward = reward
+
+        info['final_reward'] = final_reward
+        
+        if self.index_seed_step % 20000 == 0 and flag == "train":
+            coverage_stats = self.get_coverage_stats()
+            info['coverage_stats'] = coverage_stats
+            if rank == 0:
+                self.save_coverage_data('coverage_analysis.json')
+
+                if self._coverage_grid is not None and self._coverage_grid.ndim == 2:
+                    try:
+                        import matplotlib.pyplot as plt
+                        # create directory if it does not exist
+                        coverage_dir = os.path.join(exp_dir, 'grid_coverage')
+                        os.makedirs(coverage_dir, exist_ok=True)
+
+                        plt.figure(figsize=(8, 8))
+                        plt.imshow(self._coverage_grid, cmap='Blues', origin='lower')
+                        plt.title(f'Coverage Grid at Step {self.index_seed_step}\n'
+                                  f'Coverage: {coverage_stats.get("grid_coverage_percentage", 0):.1f}% '
+                                  f'({coverage_stats.get("visited_grid_cells", 0)}/{coverage_stats.get("total_grid_cells", 0)} cells)')
+                        plt.xlabel('Grid X (Projected Embedding Dim 1)')
+                        plt.ylabel('Grid Y (Projected Embedding Dim 2)')
+                        plt.colorbar(label='Visited (1) / Not Visited (0)')
+
+                        viz_file = os.path.join(coverage_dir, f'coverage_grid_step_{self.index_seed_step}.png')
+                        plt.savefig(viz_file, dpi=150, bbox_inches='tight')
+                        plt.close()
+                        print(f"Saved coverage visualization to {viz_file}")
+                    except ImportError:
+                        pass  # matplotlib not available
+        
+        return obs, final_reward, done, info
+    
 
 
 # ========================================= #

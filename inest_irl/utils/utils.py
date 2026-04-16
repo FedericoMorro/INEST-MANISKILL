@@ -207,6 +207,7 @@ def load_pickle(pretrained_path, name):
 def make_env(
   env_name,
   seed,
+  env_reward_type = "sparse",
   save_dir = None,
   add_episode_monitor = True,
   action_repeat = 1,
@@ -251,6 +252,7 @@ def make_env(
     obs_mode=obs_mode,
     control_mode="pd_ee_delta_pose", # pd_ee_delta_pos[e], with e includes also gripper quaternion orientation control
     render_mode="rgb_array",
+    env_reward_type=env_reward_type,
   )
 
   if add_episode_monitor:
@@ -284,8 +286,10 @@ def wrap_learned_reward(env, config, device):
     gym.Env object.
   """
   print("Wrapping environment with learned reward wrapper...")
-  if config.reward_wrapper.type in ("env", "baseline", "environment"):
+  if config.reward_wrapper.type in ["env", "sparse"]:
     return wrappers.EnvironmentRewardWrapper(env)
+  elif config.reward_wrapper.type == "env_state-intrinsic":
+    return wrappers.EnvironmentRewardStateIntrinsicWrapper(env)
 
   pretrained_path = config.reward_wrapper.pretrained_path
   # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -517,8 +521,10 @@ def wrap_learned_reward_single(env, config, device, model, model_config):
     "res_hw": model_config.data_augmentation.image_size,
   }
 
-  if config.reward_wrapper.type == "env":
+  if config.reward_wrapper.type in ["env", "sparse"]:
     return wrappers.EnvironmentRewardWrapper(env)
+  elif config.reward_wrapper.type == "env_state-intrinsic":
+    return wrappers.EnvironmentRewardStateIntrinsicWrapper(env)
   
   if config.reward_wrapper.type == "goal_classifier":
     from sac.wrappers import GoalClassifierLearnedVisualReward
