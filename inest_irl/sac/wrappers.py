@@ -263,8 +263,8 @@ class EpisodeMonitor(gym.ActionWrapper):
 
     if done:
       info["episode"] = dict()
-      info["episode"]["return"] = self.reward_sum
-      info["episode"]["length"] = self.episode_length
+      info["episode"]["r"] = self.reward_sum
+      info["episode"]["l"] = self.episode_length
       info["episode"]["duration"] = time.time() - self.start_time
 
     return obs, rew, done, info

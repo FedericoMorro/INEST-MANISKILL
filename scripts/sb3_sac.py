@@ -7,6 +7,7 @@ import mani_skill.envs
 import numpy as np
 import os
 from pathlib import Path
+import random
 import time
 import torch
 import wandb
@@ -291,6 +292,7 @@ def main(_):
         torch.backends.cudnn.deterministic = config.cudnn_deterministic
         torch.backends.cudnn.benchmark = not config.cudnn_deterministic
         np.random.seed(FLAGS.seed)
+        random.seed(FLAGS.seed)
     else:
         logging.warning("No random seed specified. Results may not be reproducible.")
 
@@ -311,7 +313,7 @@ def main(_):
         wandb.config.update(config.to_dict(), allow_val_change=True)
         wandb.run.log_code(".")
 
-    # Create environment function for vec_env
+    # Copying flags to local variables to avoid issues with VecEnv subprocesses creation
     env_name = copy.deepcopy(config.env_name)
     action_repeat = copy.deepcopy(config.action_repeat)
     frame_stack = copy.deepcopy(config.frame_stack)
@@ -321,6 +323,7 @@ def main(_):
     # Load environments
     logging.info(f"Creating {config.num_envs} environment(s)...")
     
+    # Create environment function for vec_env
     if config.num_envs > 1:
         # Multiple parallel environments - pass factory function with partial args
         env_fns = [
@@ -336,15 +339,9 @@ def main(_):
         # Wrap with Monitor for episode statistics
         env = Monitor(env, os.path.join(exp_dir, "train_monitor"))
     
-    # Create evaluation environment
-    base_eval_env = utils.make_env(
-        config.env_name,
-        seed=FLAGS.seed + 100,
-        action_repeat=config.action_repeat,
-        frame_stack=config.frame_stack,
-    )
-    eval_env = GymCompatibilityWrapper(base_eval_env)
-    eval_env = Monitor(eval_env, os.path.join(exp_dir, "eval_monitor"))
+    # Create evaluation environment (with different seed)
+    base_eval_env = _make_env_wrapper(env_name, base_seed + 100, reward_wrapper_type, action_repeat, frame_stack)
+    eval_env = Monitor(base_eval_env, os.path.join(exp_dir, "eval_monitor"))
 
     # Get observation and action space dimensions
     obs_space = env.observation_space if config.num_envs > 1 else env.observation_space

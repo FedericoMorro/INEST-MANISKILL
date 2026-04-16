@@ -56,6 +56,7 @@ class StackPyramidEnv(BaseEnv):
     def __init__(
         self,
         *args,
+        seed=None,
         env_reward_type="sparse",
         robot_uids="panda_wristcam",
         robot_init_qpos_noise=0.02,
@@ -63,10 +64,16 @@ class StackPyramidEnv(BaseEnv):
         **kwargs
     ):
         print("Initializing custom StackPyramid environment")
-        self.robot_init_qpos_noise = robot_init_qpos_noise
+        if seed is None:
+            seed = np.random.randint(0, 10000)
+            print(f"No seed provided for environment initialization. Results may not be reproducible. Seed selected randomly: {seed}")
+        self.seed = seed
+        
         self.randomize_cubes = randomize_cubes
         kwargs["reward_mode"] = env_reward_type
         self.max_subgoal = 4
+
+        self.robot_init_qpos_noise = robot_init_qpos_noise
         super().__init__(*args, robot_uids=robot_uids, **kwargs)
 
     @property
@@ -264,13 +271,23 @@ class StackPyramidEnv(BaseEnv):
         return self.curr_subgoal
 
 
+    def reset(self, **kwargs):
+        # if None passed, init seed will be used, since sb3 pipeline sometimes passes seed=None during reset
+        if kwargs.get("seed") is None:
+            del kwargs["seed"]
+            obs, info = super().reset(seed=self.seed, **kwargs)
+        else:
+            obs, info = super().reset(**kwargs)
+
+        # init subgoal tracking at the beginning of the episode
+        self.prev_cubeA_pos = self.cubeA.pose.p
+        self.curr_subgoal = 0
+
+        return obs, info
+
+
     def step(self, action):
         obs, reward, terminated, truncated, info = super().step(action)
-
-        # init subgoal tracking at the first step of the episode
-        if info["elapsed_steps"] == 1:
-            self.prev_cubeA_pos = self.cubeA.pose.p
-            self.curr_subgoal = 0
 
         # update subgoal success and add it to info
         self._update_subgoal_success()

@@ -249,6 +249,7 @@ def make_env(
     
   env = gym.make(
     env_name, # there are more tasks e.g. "PushCube-v1", "PegInsertionSide-v1", ...
+    seed=seed,
     obs_mode=obs_mode,
     control_mode="pd_ee_delta_pose", # pd_ee_delta_pos[e], with e includes also gripper quaternion orientation control
     render_mode="rgb_array",
