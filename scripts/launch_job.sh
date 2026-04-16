@@ -1,9 +1,8 @@
 #!/bin/bash
 
 QUEUE_TIME=$(date +%Y.%m.%d-%H.%M.%S)
-export QUEUE_TIME
 
-mkdir -p ${HOME}/logs/${QUEUE_TIME}
+mkdir -p ${HOME}/logs
 
 if [ $# -ne 2 ]; then
     echo "Usage: $0 <script_name> <experiment_name>"
@@ -41,7 +40,7 @@ if [[ "$1" == "inest" ]]; then
     sbatch --job-name=inest_rl_train \
         --ntasks-per-node=1 \
         --cpus-per-task=32 \
-        --mem=32GB \
+        --mem=64GB \
         --mail-type=ALL \
         --mail-user=federico.morro@polito.it \
         --partition=gpu_a40 \

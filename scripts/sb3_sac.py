@@ -14,69 +14,17 @@ import wandb
 import gymnasium as gym
 
 from stable_baselines3 import SAC
-from tensorboard.backend.event_processing import event_accumulator
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.evaluation import evaluate_policy
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.noise import NormalActionNoise, VectorizedActionNoise
-from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecMonitor
+from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor
 from stable_baselines3.her.her_replay_buffer import HerReplayBuffer
 
 from inest_irl.utils import utils
 
 FLAGS = flags.FLAGS
 
-
-class GymCompatibilityWrapper(gym.Wrapper):
-    """Wrapper to ensure environment returns (obs, info) tuple from reset/step."""
-    
-    def __init__(self, env):
-        self.env = env
-        self.observation_space = env.observation_space
-        self.action_space = env.action_space
-    
-    def reset(self, seed=None, **kwargs):
-        """Normalize reset output to (obs, info)."""
-        result = self.env.reset(seed=seed, **kwargs)
-        
-        # Handle different return formats
-        if isinstance(result, tuple):
-            if len(result) == 2:
-                return result  # (obs, info)
-            elif len(result) == 1:
-                return result[0], {}  # obs only, add empty info
-            else:
-                # More than 2 values - take first as obs, rest as info dict
-                return result[0], {"extra": result[1:]}
-        else:
-            # Single value (obs only)
-            return result, {}
-    
-    def step(self, action):
-        """Normalize step output to (obs, reward, terminated, truncated, info)."""
-        result = self.env.step(action)
-        
-        # Handle different return formats
-        if isinstance(result, tuple):
-            if len(result) == 5:
-                obs, reward, terminated, truncated, info = result
-                # Ensure scalar values, not arrays
-                reward = float(np.asarray(reward).squeeze())
-                terminated = bool(np.asarray(terminated).squeeze())
-                truncated = bool(np.asarray(truncated).squeeze())
-                return obs, reward, terminated, truncated, info
-            elif len(result) == 4:
-                # Old Gym API: (obs, reward, done, info)
-                obs, reward, done, info = result
-                # Ensure scalar values
-                reward = float(np.asarray(reward).squeeze())
-                done = bool(np.asarray(done).squeeze())
-                # Convert done to terminated/truncated
-                return obs, reward, done, False, info
-            else:
-                raise ValueError(f"Unexpected step return length: {len(result)}")
-        else:
-            raise ValueError(f"Step returned non-tuple: {type(result)}")
 
 flags.DEFINE_string("experiment_name", None, "Name of the experiment.")
 flags.DEFINE_integer("seed", 22, "RNG seed.")
@@ -253,17 +201,23 @@ class EvalSaveCallback(BaseCallback):
         return True
 
 
-def _make_env_wrapper(env_name, seed, reward_wrapper_type, action_repeat, frame_stack):
+def _make_env_wrapper(config, seed, rank, train_flag, device, exp_dir):
     """Factory function for creating environments in subprocesses."""
-    env = utils.make_env(
-        env_name,
+    return utils.make_env(
+        env_name=config.env_name,
         seed=seed,
-        env_reward_type="normalized_dense" if reward_wrapper_type == "env" else "sparse",
-        action_repeat=action_repeat,
-        frame_stack=frame_stack,
-        obs_mode="state" if reward_wrapper_type != "sparse" else "state_dict",
+        env_reward_type="normalized_dense" if config.reward_wrapper.type == "env" else "sparse",
+        obs_mode="state" if config.reward_wrapper.type != "sparse" else "state_dict",
+        frame_stack=config.frame_stack,
+        action_repeat=config.action_repeat,
+        rank=rank,
+        train_flag=train_flag,
+        exp_dir=exp_dir,
+        learned_reward_pretrained_path=config.reward_wrapper.pretrained_path,
+        device=device,
+        add_episode_monitor = True,
+        save_video=False,
     )
-    return GymCompatibilityWrapper(env)
 
 
 def main(_):
@@ -314,11 +268,8 @@ def main(_):
         wandb.run.log_code(".")
 
     # Copying flags to local variables to avoid issues with VecEnv subprocesses creation
-    env_name = copy.deepcopy(config.env_name)
-    action_repeat = copy.deepcopy(config.action_repeat)
-    frame_stack = copy.deepcopy(config.frame_stack)
+    config_copy = copy.deepcopy(config)
     base_seed = copy.deepcopy(FLAGS.seed)
-    reward_wrapper_type = copy.deepcopy(config.reward_wrapper.type)
 
     # Load environments
     logging.info(f"Creating {config.num_envs} environment(s)...")
@@ -327,7 +278,7 @@ def main(_):
     if config.num_envs > 1:
         # Multiple parallel environments - pass factory function with partial args
         env_fns = [
-            functools.partial(_make_env_wrapper, env_name, base_seed + i, reward_wrapper_type, action_repeat, frame_stack)
+            functools.partial(_make_env_wrapper, config, base_seed, rank=i, train_flag=True, device=device, exp_dir=exp_dir)
             for i in range(config.num_envs)
         ]
         env = SubprocVecEnv(env_fns)
@@ -335,12 +286,12 @@ def main(_):
         env = VecMonitor(env, os.path.join(exp_dir, "train_monitor"))
     else:
         # Single environment
-        env = _make_env_wrapper(env_name, base_seed, reward_wrapper_type, action_repeat, frame_stack)
+        env = _make_env_wrapper(config, base_seed, rank=0, train_flag=True, device=device, exp_dir=exp_dir)
         # Wrap with Monitor for episode statistics
         env = Monitor(env, os.path.join(exp_dir, "train_monitor"))
     
     # Create evaluation environment (with different seed)
-    base_eval_env = _make_env_wrapper(env_name, base_seed + 100, reward_wrapper_type, action_repeat, frame_stack)
+    base_eval_env = _make_env_wrapper(config, base_seed + 1000, rank=0, train_flag=False, device=device, exp_dir=exp_dir)
     eval_env = Monitor(base_eval_env, os.path.join(exp_dir, "eval_monitor"))
 
     # Get observation and action space dimensions

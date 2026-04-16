@@ -208,11 +208,16 @@ def make_env(
   env_name,
   seed,
   env_reward_type = "sparse",
-  save_dir = None,
-  add_episode_monitor = True,
-  action_repeat = 1,
-  frame_stack = 1,
   obs_mode = "state",
+  frame_stack = 1,
+  action_repeat = 1,
+  rank = 0,
+  train_flag = False,
+  exp_dir = None,
+  learned_reward_pretrained_path = None,
+  device = None,
+  add_episode_monitor = True,
+  save_video = False,
 ):
   """Env factory with wrapping.
 
@@ -262,41 +267,55 @@ def make_env(
     env = wrappers.ActionRepeat(env, action_repeat)
   # Temporarily disable RescaleAction to debug reset issue
   # env = RescaleAction(env, -1.0, 1.0)
-  if save_dir is not None:
-    env = wrappers.VideoRecorder(env, save_dir=save_dir)
+  if save_video and exp_dir is not None:
+    env = wrappers.VideoRecorder(env, save_dir=exp_dir)
   if frame_stack > 1:
     env = wrappers.FrameStack(env, frame_stack)
+
+  wrapped_env = wrap_env(
+    env,
+    env_reward_type,
+    rank,
+    train_flag,
+    exp_dir,
+    learned_reward_pretrained_path,
+    device,
+  )
 
   # Seed.
 #   env.seed(seed)
 #   env.action_space.seed(seed)
 #   env.observation_space.seed(seed)
 
-  return env
+  #return wrappers.GymCompatibilityWrapper(wrapped_env)
+  return wrapped_env
 
 
-def wrap_learned_reward(env, config, device):
+def wrap_env(env, env_reward_type, rank, train_flag, exp_dir, learned_reward_pretrained_path, device):
   """Wrap the environment with a learned reward wrapper.
 
   Args:
     env: A `gym.Env` to wrap with a `LearnedVisualRewardWrapper` wrapper.
-    config: RL config dict, must inherit from base config defined in
-      `configs/rl_default.py`.
+    env_reward_type: The type of reward wrapper to use.
+    learned_reward_pretrained_path: The path to the pretrained reward model.
+    device: The device to use for the reward model. 
 
   Returns:
     gym.Env object.
   """
   print("Wrapping environment with learned reward wrapper...")
-  if config.reward_wrapper.type in ["env", "sparse"]:
-    return wrappers.EnvironmentRewardWrapper(env)
-  elif config.reward_wrapper.type == "env_state-intrinsic":
-    return wrappers.EnvironmentRewardStateIntrinsicWrapper(env)
+  if env_reward_type in ["env", "sparse", "normalized_dense"]:
+    return wrappers.EnvironmentRewardWrapper(env, rank, train_flag, exp_dir)
+  elif env_reward_type == "env_state-intrinsic":
+    return wrappers.EnvironmentRewardStateIntrinsicWrapper(env, rank, train_flag, exp_dir)
+  else:
+     raise NotImplementedError(f"Reward wrapper type {env_reward_type} not implemented yet.")
 
-  pretrained_path = config.reward_wrapper.pretrained_path
+  pretrained_path = learned_reward_pretrained_path
   # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
   model_config, model = load_model_checkpoint(pretrained_path, device)
   
-  if config.reward_wrapper.type == "reds":
+  if env_reward_type == "reds":
     print("Model loaded")
     model.load_state_dict(torch.load(
         os.path.join(pretrained_path, "reds_model.pth"),
@@ -312,16 +331,16 @@ def wrap_learned_reward(env, config, device):
   }
   
 
-  if config.reward_wrapper.type == "goal_classifier":
+  if env_reward_type == "goal_classifier":
     env = wrappers.GoalClassifierLearnedVisualReward(**kwargs)
 
-  elif config.reward_wrapper.type == "distance_to_goal":
+  elif env_reward_type == "distance_to_goal":
     kwargs["goal_emb"] = load_pickle(pretrained_path, "goal_emb.pkl")
     kwargs["distance_scale"] = load_pickle(pretrained_path,
                                            "distance_scale.pkl")
     env = wrappers.DistanceToGoalLearnedVisualReward(**kwargs)
     
-  elif config.reward_wrapper.type == "inest":
+  elif env_reward_type == "inest":
     all_means = load_pickle(pretrained_path, "subtask_means.pkl")
     selected_means_2_4_6 = [all_means[i] for i in [1]]  # elements 2,4,6
     kwargs["subtask_means"] = selected_means_2_4_6
@@ -329,7 +348,7 @@ def wrap_learned_reward(env, config, device):
                                            "distance_scale.pkl")
     env = wrappers.INESTIRLLearnedVisualReward(**kwargs)
     
-  elif config.reward_wrapper.type == "inest_knn":
+  elif env_reward_type == "inest_knn":
     all_means = load_pickle(pretrained_path, "subtask_means.pkl")
     selected_means_2_4_6 = [all_means[i] for i in [0,1]]  # elements 2,4,6
     kwargs["subtask_means"] = selected_means_2_4_6
@@ -337,7 +356,7 @@ def wrap_learned_reward(env, config, device):
                                            "distance_scale.pkl")
     env = wrappers.KNNINESTIRLLearnedVisualReward(**kwargs)
     
-  elif config.reward_wrapper.type == "state_intrinsic":
+  elif env_reward_type == "state_intrinsic":
     all_means = load_pickle(pretrained_path, "subtask_means.pkl")
     selected_means_2_4_6 = [all_means[i] for i in [0,1]]  # elements 2,4,6
     kwargs["subtask_means"] = selected_means_2_4_6
@@ -345,242 +364,13 @@ def wrap_learned_reward(env, config, device):
                                            "distance_scale.pkl")
     env = wrappers.STATEINTRINSICLearnedVisualReward(**kwargs)
     
-  elif config.reward_wrapper.type == "reds":
+  elif env_reward_type == "reds":
     print("AAAAAAA")
     env = wrappers.REDSLearnedVisualReward(**kwargs)
 
   else:
     raise ValueError(
-        f"{config.reward_wrapper.type} is not a valid reward wrapper.")
+        f"{env_reward_type} is not a valid reward wrapper.")
 
   return env
 
-
-
-
-def make_buffer(
-  env,
-  device,
-  config,
-  flattened_obs_shape=None,
-  flattened_next_obs_shape=None,
-):
-  """Replay buffer factory.
-
-  Args:
-    env: A `gym.Env`.
-    device: A `torch.device` object.
-    config: RL config dict, must inherit from base config defined in
-      `configs/rl_default.py`.
-    flattened_obs_shape: Optional tuple specifying the shape of flattened observations.
-      If provided, this will be used instead of env.observation_space.shape.
-
-  Returns:
-    ReplayBuffer.
-  """
-  # Use flattened observation shape if provided, otherwise use environment's shape
-  obs_shape = flattened_obs_shape if flattened_obs_shape is not None else env.observation_space.shape
-  next_obs_shape = flattened_next_obs_shape if flattened_next_obs_shape is not None else env.observation_space.shape
-
-  kwargs = {
-      "obs_shape": obs_shape,
-      "next_obs_shape": next_obs_shape,
-      "action_shape": env.action_space.shape,
-      "capacity": config.replay_buffer_capacity,
-      "device": device,
-  }
-
-  buffer = replay_buffer.ReplayBuffer(**kwargs)
-  return buffer
-
-
-# ========================================= #
-# Misc. utils.
-# ========================================= #
-
-
-def plot_reward(rews):
-  """Plot raw and cumulative rewards over an episode."""
-  _, axes = plt.subplots(1, 2, figsize=(12, 4), sharex=True)
-  axes[0].plot(rews)
-  axes[0].set_xlabel("Timestep")
-  axes[0].set_ylabel("Reward")
-  axes[1].plot(np.cumsum(rews))
-  axes[1].set_xlabel("Timestep")
-  axes[1].set_ylabel("Cumulative Reward")
-  for ax in axes:
-    ax.grid(visible=True, which="major", linestyle="-")
-    ax.grid(visible=True, which="minor", linestyle="-", alpha=0.2)
-  plt.minorticks_on()
-  plt.show()
-
-
-# ========================================= #
-# Vector Environment utils for DDP.
-# ========================================= #
-
-def make_vector_env(
-  env_name,
-  num_envs,
-  seed_start,
-  save_dir = None,
-  add_episode_monitor = True,
-  action_repeat = 1,
-  frame_stack = 1,
-):
-  """Create synchronized vector environment for DDP training.
-  
-  Args:
-    env_name: The name of the environment.
-    num_envs: Number of parallel environments to create.
-    seed_start: Starting seed (will be incremented for each env).
-    save_dir: Specify a save directory to wrap with `VideoRecorder`.
-    add_episode_monitor: Set to True to wrap with `EpisodeMonitor`.
-    action_repeat: A value > 1 will wrap with `ActionRepeat`.
-    frame_stack: A value > 1 will wrap with `FrameStack`.
-    
-  Returns:
-    gym.vector.SyncVectorEnv object.
-  """
-  # Use Gymnasium vector API since make_env returns Gymnasium envs/spaces.
-  from gymnasium.vector import SyncVectorEnv
-
-  class _VectorAPICompatibilityWrapper(gym.Wrapper):
-    """Normalizes reset/step outputs to Gymnasium's vector API contract."""
-
-    def reset(self, *, seed=None, options=None):
-      out = self.env.reset(seed=seed, options=options)
-      if isinstance(out, tuple) and len(out) == 2:
-        return out
-      return out, {}
-
-    def step(self, action):
-      out = self.env.step(action)
-      if isinstance(out, tuple) and len(out) == 5:
-        return out
-      if isinstance(out, tuple) and len(out) == 4:
-        obs, reward, done, info = out
-        return obs, reward, done, False, info
-      raise ValueError(f"Unexpected step() output format: {type(out)}")
-  
-  def _make_env(rank):
-    def _init():
-      env_seed = seed_start + rank
-      env = make_env(
-          env_name=env_name,
-          seed=env_seed,
-          save_dir=save_dir if rank == 0 else None,  # Only first env saves videos
-          add_episode_monitor=add_episode_monitor,
-          action_repeat=action_repeat,
-          frame_stack=frame_stack,
-      )
-      return _VectorAPICompatibilityWrapper(env)
-    return _init
-  
-  # Create vector environment
-  env_fns = [_make_env(i) for i in range(num_envs)]
-  venv = SyncVectorEnv(env_fns)
-  
-  return venv
-
-def wrap_vector_learned_reward(venv, config, device):
-  """Wrap vector environment with learned reward.
-  
-  Args:
-    venv: A vector environment.
-    config: RL config dict.
-    device: Torch device.
-    
-  Returns:
-    Wrapped vector environment.
-  """
-  # For vector environments, we need to wrap each individual environment
-  print("Wrapping vector environment with learned reward...")
-  
-  pretrained_path = config.reward_wrapper.pretrained_path
-  model_config, model = load_model_checkpoint(pretrained_path, device)
-  
-  if config.reward_wrapper.type == "reds":
-    model.load_state_dict(torch.load(
-        os.path.join(pretrained_path, "reds_model.pth"),
-        map_location=device,
-    ))
-    model.to(device).eval()
-
-  # Apply the wrapper to each individual environment
-  for i, env in enumerate(venv.envs):
-    venv.envs[i] = wrap_learned_reward_single(env, config, device, model, model_config)
-  
-  return venv
-
-def wrap_learned_reward_single(env, config, device, model, model_config):
-  """Wrap a single environment with learned reward."""
-  kwargs = {
-    "env": env,
-    "model": model,
-    "device": device,
-    "res_hw": model_config.data_augmentation.image_size,
-  }
-
-  if config.reward_wrapper.type in ["env", "sparse"]:
-    return wrappers.EnvironmentRewardWrapper(env)
-  elif config.reward_wrapper.type == "env_state-intrinsic":
-    return wrappers.EnvironmentRewardStateIntrinsicWrapper(env)
-  
-  if config.reward_wrapper.type == "goal_classifier":
-    from sac.wrappers import GoalClassifierLearnedVisualReward
-    return GoalClassifierLearnedVisualReward(**kwargs)
-  elif config.reward_wrapper.type == "distance_to_goal":
-    kwargs["goal_emb"] = load_pickle(config.reward_wrapper.pretrained_path, "goal_emb.pkl")
-    kwargs["distance_scale"] = load_pickle(config.reward_wrapper.pretrained_path, "distance_scale.pkl")
-    from sac.wrappers import DistanceToGoalLearnedVisualReward
-    return DistanceToGoalLearnedVisualReward(**kwargs)
-  elif config.reward_wrapper.type == "holdr":
-    kwargs["subtask_means"] = load_pickle(config.reward_wrapper.pretrained_path, "subtask_means.pkl")
-    kwargs["distance_scale"] = load_pickle(config.reward_wrapper.pretrained_path, "distance_scale.pkl")
-    from sac.wrappers import HOLDRLearnedVisualReward
-    return HOLDRLearnedVisualReward(**kwargs)
-  elif config.reward_wrapper.type == "reds":
-    from sac.wrappers import REDSLearnedVisualReward
-    return REDSLearnedVisualReward(**kwargs)
-  else:
-    return env
-
-def make_vect_buffer(env, device, config):
-    """Replay buffer factory.
-
-    Args:
-      env: A `gym.Env`.
-      device: A `torch.device` object.
-      config: RL config dict, must inherit from base config defined in
-        `configs/rl_default.py`.
-
-    Returns:
-      ReplayBuffer.
-    """
-    # Handle both single and vector environments for action_shape
-    if hasattr(env, 'single_action_space'):
-      # Vector environment
-      action_shape = env.single_action_space.shape
-      obs_shape = env.single_observation_space.shape
-    elif isinstance(env.action_space, (tuple, gym.spaces.Tuple)):
-      # Vector environment with tuple action space
-      action_shape = env.action_space[0].shape
-      obs_shape = env.observation_space.shape
-    else:
-      # Single environment
-      action_shape = env.action_space.shape
-      obs_shape = env.observation_space.shape
-
-    obs_shape = (obs_shape[0] * config.frame_stack,)
-
-    kwargs = {
-        "obs_shape": obs_shape,
-        "action_shape": action_shape,
-        "capacity": config.replay_buffer_capacity,
-        "device": device,
-        "next_obs_shape": obs_shape,  # assuming next_obs has same shape as obs
-    }
-
-    # Use standard replay buffer
-    return replay_buffer.ReplayBuffer(**kwargs)

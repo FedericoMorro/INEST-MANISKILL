@@ -331,31 +331,46 @@ class VideoRecorder(gym.Wrapper):
     return observation, reward, done, info
 
 
-class EnvironmentRewardWrapper(gym.Wrapper):
-    """Compatibility wrapper that keeps raw environment rewards.
+class RewardWrapper(gym.Wrapper):
+    """Base class for reward wrappers that compute a modified reward based on the environment reward and/or other info."""
 
-    This wrapper preserves the step signature used by learned reward wrappers so
-    training/evaluation code can stay unchanged across reward modes.
-    """
-
-    def __init__(self, env, index_seed_step=0):
+    def __init__(self, env, rank, train_flag, exp_dir, index_seed_step=0):
         super().__init__(env)
         self.index_seed_step = index_seed_step
+        self.rank = rank
+        self.train_flag = train_flag
+        self.exp_dir = exp_dir
+        print(f"Initialized RewardWrapper with rank={rank}, train_flag={train_flag}, exp_dir='{exp_dir}'")
 
-    def step(self, action, rank=None, exp_dir=None, flag="train"):
-        del rank, exp_dir, flag  # Interface compatibility with learned wrappers.
+    def reset(self, *args, **kwargs):
+        """Reset the environment and any internal state."""
+        # ensure gym compatibility by normalizing reset output to (obs, info)
+        res = self.env.reset(*args, **kwargs)
+        if len(res) == 2:
+            return res  # (obs, info)
+        else:
+            return res, {}  # obs only, add empty info
+
+    def step(self, action):
+        # ensure gym compatibility by normalizing step output to (obs, reward, terminated, truncated, info)
         result = self.env.step(action)
         if len(result) == 5:
             obs, reward, terminated, truncated, info = result
-            done = _merge_done(terminated, truncated)
         else:
-            obs, reward, done, info = result
+            obs, reward, terminated, info = result
+            truncated = False
 
+        reward = float(np.asarray(reward).squeeze())
+        terminated = bool(np.asarray(terminated).squeeze())
+        truncated = bool(np.asarray(truncated).squeeze())
+
+        # add dummy eval score for compatibility
         info = dict(info)
         info.setdefault("env_reward", reward)
         if "eval_score" not in info and "success" in info:
             info["eval_score"] = info["success"]
-        return obs, reward, done, info
+
+        return obs, reward, terminated, truncated, info
 
     def reset_state(self):
         """No-op for compatibility with wrappers that keep internal state."""
@@ -372,7 +387,7 @@ class EnvironmentRewardWrapper(gym.Wrapper):
     def save_coverage_data(self, filepath):
         """Persist an empty payload to match learned-wrapper API."""
         payload = {
-                "mode": "environment_reward_baseline",
+                "mode": "reward_wrapper",
                 "message": "No learned-reward coverage data available.",
         }
         with open(filepath, "w") as f:
@@ -380,11 +395,16 @@ class EnvironmentRewardWrapper(gym.Wrapper):
             json.dump(payload, f, indent=2)
 
 
-class StateIntrinsicEnvironmentRewardWrapper(EnvironmentRewardWrapper):
+class EnvironmentRewardWrapper(RewardWrapper):
+    """Compatibility wrapper that keeps raw environment rewards."""
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+
+class StateIntrinsicEnvironmentRewardWrapper(RewardWrapper):
     """Compatibility wrapper that adds a state-based intrinsic reward to the environment reward."""
     def __init__(
         self,
-        index_seed_step = 0,
         intrinsic_scale=0.2,
         k_nearest=10,
         max_memory=5_000,
@@ -392,8 +412,6 @@ class StateIntrinsicEnvironmentRewardWrapper(EnvironmentRewardWrapper):
         **base_kwargs,
     ):
         super().__init__(**base_kwargs)
-        
-        self.index_seed_step = index_seed_step
 
         # intrinsic reward parameters
         self._intrinsic_scale = intrinsic_scale
@@ -753,12 +771,12 @@ class StateIntrinsicEnvironmentRewardWrapper(EnvironmentRewardWrapper):
         # self._unique_states_visited = 0
         # print("WRAPPER: Also reset coverage tracking.")
 
-    def step(self, action, rank, exp_dir, flag):
+    def step(self, action):
         obs, reward, done, info = self.env.step(action)
         info['env_reward'] = reward
         
         # calculate intrinsic reward based on state
-        if flag == "train":
+        if self.train_flag:
             self._update_coverage_metrics(obs)
             intrinsic_reward = self._compute_intrinsic_reward_from_state(obs)
                 
@@ -770,17 +788,17 @@ class StateIntrinsicEnvironmentRewardWrapper(EnvironmentRewardWrapper):
 
         info['final_reward'] = final_reward
         
-        if self.index_seed_step % 20000 == 0 and flag == "train":
+        if self.index_seed_step % 20000 == 0 and self.train_flag:
             coverage_stats = self.get_coverage_stats()
             info['coverage_stats'] = coverage_stats
-            if rank == 0:
+            if self.rank == 0:
                 self.save_coverage_data('coverage_analysis.json')
 
                 if self._coverage_grid is not None and self._coverage_grid.ndim == 2:
                     try:
                         import matplotlib.pyplot as plt
                         # create directory if it does not exist
-                        coverage_dir = os.path.join(exp_dir, 'grid_coverage')
+                        coverage_dir = os.path.join(self.exp_dir, 'grid_coverage')
                         os.makedirs(coverage_dir, exist_ok=True)
 
                         plt.figure(figsize=(8, 8))
