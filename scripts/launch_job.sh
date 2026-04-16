@@ -38,7 +38,7 @@ if [[ "$1" == "inest" ]]; then
         esac
     fi
 
-    sbatch --job-name=inest_maniskill_rl_training \
+    sbatch --job-name=inest_rl_train \
         --ntasks-per-node=1 \
         --cpus-per-task=32 \
         --mem=32GB \
@@ -46,8 +46,8 @@ if [[ "$1" == "inest" ]]; then
         --mail-user=federico.morro@polito.it \
         --partition=gpu_a40 \
         --gres=gpu:1 \
-        --output=${HOME}/logs/${QUEUE_TIME}/inest_maniskill_rl_training_%j.out \
-        --error=${HOME}/logs/${QUEUE_TIME}/inest_maniskill_rl_training_%j.err \
+        --output=${HOME}/logs/%j_${EXPERIMENT_NAME}_inest.out \
+        --error=${HOME}/logs/%j_${EXPERIMENT_NAME}_inest.err \
         /home/fmorro/INEST-MANISKILL/scripts/submit_inest_train.sh
 else
     echo "Unknown argument: $1. Please specify 'inest' to submit the INEST MANISKILL RL training job."

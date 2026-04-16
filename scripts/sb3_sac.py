@@ -257,7 +257,7 @@ def _make_env_wrapper(env_name, seed, reward_wrapper_type, action_repeat, frame_
     env = utils.make_env(
         env_name,
         seed=seed,
-        env_reward_type="dense_normalized" if reward_wrapper_type == "env" else "sparse",
+        env_reward_type="normalized_dense" if reward_wrapper_type == "env" else "sparse",
         action_repeat=action_repeat,
         frame_stack=frame_stack,
         obs_mode="state" if reward_wrapper_type != "sparse" else "state_dict",
