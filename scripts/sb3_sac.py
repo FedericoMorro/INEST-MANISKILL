@@ -2,16 +2,15 @@ from absl import app, flags, logging
 import copy
 import functools
 import json
-from ml_collections import config_dict, config_flags
-import mani_skill.envs
+from ml_collections import config_flags
 import numpy as np
 import os
-from pathlib import Path
 import random
 import time
 import torch
 import wandb
-import gymnasium as gym
+
+from mani_skill.vector.wrappers.sb3 import ManiSkillSB3VectorEnv
 
 from stable_baselines3 import SAC
 from stable_baselines3.common.callbacks import BaseCallback

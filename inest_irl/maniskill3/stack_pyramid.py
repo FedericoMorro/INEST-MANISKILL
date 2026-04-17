@@ -286,13 +286,22 @@ class StackPyramidEnv(BaseEnv):
         self.step_count = 0
 
         #! equal seed at reset => same env reset
-        obs, info = super().reset(**kwargs)
+        # seed is used only one (common practice) to ensure reproducibility of environment initialization
+        if self.seed is not None:
+            del kwargs["seed"]   # remove seed from kwargs to avoid multiple assignments error
+            obs, info = super().reset(seed=self.seed, **kwargs)
+            self._reset_seed()
+        else:
+            obs, info = super().reset(**kwargs)
 
         # init subgoal tracking at the beginning of the episode
         self.prev_cubeA_pos = self.cubeA.pose.p
         self.curr_subgoal = 0
 
         return obs, info
+    
+    def _reset_seed(self):
+        self.seed = None
 
 
     def step(self, action):
@@ -306,10 +315,8 @@ class StackPyramidEnv(BaseEnv):
         if ENFORCE_FULL_EPISODES:
             if self.step_count < HORIZON:
                 terminated = torch.tensor([False], device=self.device)
-                truncated = torch.tensor([False], device=self.device)
             else:
                 terminated = torch.tensor([True], device=self.device)
-                truncated = torch.tensor([True], device=self.device)
             
         return obs, reward, terminated, truncated, info
 
