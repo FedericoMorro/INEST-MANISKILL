@@ -9,3 +9,4 @@
 - `sac/sac.py`: 1
 - `common/evaluation.py`: 2
 - `common/off_policy_algorithm.py`: 3
+- `common/base_class.py`: 3

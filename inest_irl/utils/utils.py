@@ -218,6 +218,7 @@ def make_env(
   device = None,
   add_episode_monitor = True,
   save_video = False,
+  wrap=True,
 ):
   """Env factory with wrapping.
 
@@ -271,6 +272,9 @@ def make_env(
     env = wrappers.VideoRecorder(env, save_dir=exp_dir)
   if frame_stack > 1:
     env = wrappers.FrameStack(env, frame_stack)
+
+  if not wrap:
+    return env
 
   wrapped_env = wrap_env(
     env,

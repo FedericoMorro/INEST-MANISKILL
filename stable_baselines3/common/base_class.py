@@ -450,7 +450,7 @@ class BaseAlgorithm(ABC):
             dones = np.array([False] * len(infos))
         for idx, info in enumerate(infos):
             maybe_ep_info = info.get("episode")
-            maybe_is_success = info.get("is_success")
+            maybe_is_success = info.get("is_success") or info.get("success")
             if maybe_ep_info is not None:
                 self.ep_info_buffer.extend([maybe_ep_info])
             if maybe_is_success is not None and dones[idx]:

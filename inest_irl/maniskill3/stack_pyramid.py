@@ -166,21 +166,31 @@ class StackPyramidEnv(BaseEnv):
                 )
                 self.cubeC.set_pose(Pose.create_from_pq(p=xyz, q=qs))
             else:
-                # Fixed positions without randomization
-                # Identity quaternion (no rotation)
-                identity_q = torch.tensor([1, 0, 0, 0], device=self.device).unsqueeze(0).repeat(b, 1)
+                # Fixed positions with small randomization
+                # Small position noise
+                pos_noise_A = torch.randn((b, 3), device=self.device) * 0.005
+                pos_noise_A[:, 2] = 0  # no z noise
+                pos_noise_B = torch.randn((b, 3), device=self.device) * 0.005
+                pos_noise_B[:, 2] = 0
+                pos_noise_C = torch.randn((b, 3), device=self.device) * 0.005
+                pos_noise_C[:, 2] = 0
                 
-                # Cube A - red, at origin on table
-                cubeA_pos = torch.tensor([[-0.08, 0.08, 0.02]], device=self.device).repeat(b, 1)
-                self.cubeA.set_pose(Pose.create_from_pq(p=cubeA_pos, q=identity_q))
+                # Small rotation noise (only z-axis)
+                qs_A = randomization.random_quaternions(b, lock_x=True, lock_y=True, lock_z=False, bounds=(-np.pi/24, np.pi/24), device=self.device)
+                qs_B = randomization.random_quaternions(b, lock_x=True, lock_y=True, lock_z=False, bounds=(-np.pi/24, np.pi/24), device=self.device)
+                qs_C = randomization.random_quaternions(b, lock_x=True, lock_y=True, lock_z=False, bounds=(-np.pi/24, np.pi/24), device=self.device)
                 
-                # Cube B - green, offset along x-axis
-                cubeB_pos = torch.tensor([[0.08, 0.00, 0.02]], device=self.device).repeat(b, 1)
-                self.cubeB.set_pose(Pose.create_from_pq(p=cubeB_pos, q=identity_q))
+                # Cube A
+                cubeA_pos = torch.tensor([[-0.08, 0.08, 0.02]], device=self.device).repeat(b, 1) + pos_noise_A
+                self.cubeA.set_pose(Pose.create_from_pq(p=cubeA_pos, q=qs_A))
                 
-                # Cube C - blue, offset along negative x-axis
-                cubeC_pos = torch.tensor([[-0.08, -0.08, 0.02]], device=self.device).repeat(b, 1)
-                self.cubeC.set_pose(Pose.create_from_pq(p=cubeC_pos, q=identity_q))
+                # Cube B
+                cubeB_pos = torch.tensor([[0.08, 0.00, 0.02]], device=self.device).repeat(b, 1) + pos_noise_B
+                self.cubeB.set_pose(Pose.create_from_pq(p=cubeB_pos, q=qs_B))
+                
+                # Cube C
+                cubeC_pos = torch.tensor([[-0.08, -0.08, 0.02]], device=self.device).repeat(b, 1) + pos_noise_C
+                self.cubeC.set_pose(Pose.create_from_pq(p=cubeC_pos, q=qs_C))
 
     def evaluate(self):
         pos_A = self.cubeA.pose.p
@@ -377,7 +387,8 @@ class StackPyramidEnv(BaseEnv):
             distance_AC = torch.linalg.norm(offset_AC)
             distance_BC = torch.linalg.norm(offset_BC)
             z_flag = torch.abs(offset_BC[..., 2]) > 0.02
-            grasp_flag = self.agent.is_grasping(self.cubeC)
+            grasp_flag = self.agent.is_grasping(self.cubeC) or z_flag
+            # give reward even if not grasping but above threshold to avoid decrease when releasing cube C after stacking
 
             # in [0,1], equal contribution eef-C, AB-to-C, grasp+height bonus
             reward = (
