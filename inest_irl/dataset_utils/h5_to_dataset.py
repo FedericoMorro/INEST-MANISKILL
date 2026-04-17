@@ -1,6 +1,6 @@
 """
 Converts h5 files to a dataset to be used for training and validation.
-! check global variables to handle keys to be saved
+Configuration is loaded from a yaml file (default: configs_h5_to_dataset/maniskill_demos.yaml)
 
 Sample h5 file structure assumed:
   traj_0:
@@ -56,6 +56,12 @@ Example usage:
 python inest_irl/dataset_utils/h5_to_dataset.py
     --h5_path ../data/maniskill/StackPyramid-v1_data.../trajectory...h5
     --dataset_path ../data/inest-maniskill/dataset...
+
+# for negative trajs
+python inest_irl/dataset_utils/h5_to_dataset.py
+    --h5_path ../data/inest-maniskill/experiments_data-trajs/tajs_.../trajectory...h5
+    --dataset_path ../data/inest-maniskill/experiments_data-trajs/dataset...
+    --config inest_irl/dataset_utils/configs_h5_to_dataset/sb3-sac_trajs.yaml
 """
 
 
@@ -65,14 +71,9 @@ import json
 import numpy as np
 import os
 import shutil
+import yaml
 from tqdm import tqdm
 from PIL import Image
-
-
-OBS_KEY = 'obs/sensor_data/base_camera/rgb'
-ACTION_KEYS = ['actions']
-ROBOT_STATE_KEYS = ['obs/agent/qpos', 'obs/agent/qvel']
-OBJECTS_STATE_KEYS = ['env_states/actors/cubeA', 'env_states/actors/cubeB', 'env_states/actors/cubeC']
 
 
 def _access_nested_group(group, key):
@@ -83,6 +84,9 @@ def _access_nested_group(group, key):
 
 
 def _save_data_as_json(group, keys, key_type, path, traj_idx):
+  if keys is None:
+    return
+  
   for key in keys:
     data = _access_nested_group(group, key)
     data_list = np.array(data).tolist()  # convert to list for json serialization
@@ -92,23 +96,33 @@ def _save_data_as_json(group, keys, key_type, path, traj_idx):
       json.dump(data_list, f)
 
 
-def handle_traj(group, path, idx):
+def handle_traj(group, path, idx, obs_key, action_keys, robot_state_keys, objects_state_keys):
   # save a frame-idx.png for each frame in the trajectory
-  obs = _access_nested_group(group, OBS_KEY)
-  for i in range(obs.shape[0]):
-    frame_path = os.path.join(path, f'{i}.png')
-    Image.fromarray(obs[i]).save(frame_path)
+  if obs_key is not None:
+    obs = _access_nested_group(group, obs_key)
+    for i in range(obs.shape[0]):
+      frame_path = os.path.join(path, f'{i}.png')
+      Image.fromarray(obs[i]).save(frame_path)
     
   # save a traj-idx_element.json for each trajectory element
-  _save_data_as_json(group, ACTION_KEYS, None, path, idx)
-  _save_data_as_json(group, ROBOT_STATE_KEYS, 'robot', path, idx)
-  _save_data_as_json(group, OBJECTS_STATE_KEYS, 'objects', path, idx)
+  _save_data_as_json(group, action_keys, None, path, idx)
+  _save_data_as_json(group, robot_state_keys, 'robot', path, idx)
+  _save_data_as_json(group, objects_state_keys, 'objects', path, idx)
 
 
 
 def main(args):
   # set random seed for reproducibility
   np.random.seed(args.random_seed)
+
+  # load configuration from yaml file
+  with open(args.config, 'r') as f:
+    config = yaml.safe_load(f)
+  
+  obs_key = config['obs_key']
+  action_keys = config['action_keys']
+  robot_state_keys = config['robot_state_keys']
+  objects_state_keys = config['objects_state_keys']
 
   # handle dataset path
   if args.dataset_path is None:
@@ -117,7 +131,10 @@ def main(args):
   print(f'Dataset will be saved to: {args.dataset_path}')
 
   # create needed nesting
-  name = f'{OBS_KEY.split("/")[-2]}-{OBS_KEY.split("/")[-1]}'
+  if obs_key is not None:
+    name = f'{obs_key.split("/")[-2]}-{obs_key.split("/")[-1]}'
+  else:
+    name = 'data'
 
   train_path = os.path.join(args.dataset_path, 'train')
   train_path = os.path.join(train_path, name)
@@ -137,14 +154,14 @@ def main(args):
 
     # create trajectory folder
     traj_idx = traj_name.split('_')[-1]
-    if np.random.rand() < args.train_split:
+    if np.random.rand() < config['train_split']:
       traj_path = os.path.join(train_path, traj_idx)
     else:
       traj_path = os.path.join(valid_path, traj_idx)
     os.makedirs(traj_path, exist_ok=True)
 
     # handle trajectory data
-    handle_traj(traj_group, traj_path, traj_idx)
+    handle_traj(traj_group, traj_path, traj_idx, obs_key, action_keys, robot_state_keys, objects_state_keys)
 
   h5_file.close()
 
@@ -163,8 +180,9 @@ if __name__ == '__main__':
                         help='Path to the h5 file')
   arg_pars.add_argument('--dataset_path', type=str, default=None,
                         help='Path to the dataset folder (if not specified, it will be the saame as the h5 file)')
-  arg_pars.add_argument('--train_split', type=float, default=0.9,
-                        help='Percentage of the data to be used for training (the rest will be used for validation)')
+  arg_pars.add_argument('--config', type=str, 
+                        default=os.path.join(os.path.dirname(__file__), 'configs_h5_to_dataset', 'maniskill_demos.yaml'),
+                        help='Path to the configuration yaml file')
   arg_pars.add_argument('--random_seed', type=int, default=22,
                         help='Random seed for reproducibility')
   args = arg_pars.parse_args()

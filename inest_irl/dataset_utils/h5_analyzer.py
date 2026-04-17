@@ -3,6 +3,7 @@ Example usage:
 
 python inest_irl/dataset_utils/h5_analyzer.py
 	../data/maniskill/StackPyramid-v1_.../trajectory...h5
+    [--print_structure]         file structure inspection, it will exit (it is printed by default even in other modes)
 	[--vis]
 	[--sample_traj]
 	[--stats]
@@ -234,10 +235,12 @@ def _get_nested(h5obj, path):
     return obj
 
 
-def _save_demo_videos(h5_file, demo_names, output_dir, subgoals_data=None):
+def _save_demo_videos(h5_file, demo_names, output_dir, subgoals_path=None):
     print("Saving demo videos with subgoal overlays (if provided)...")
     out_dir = os.path.join(output_dir, "videos")
     os.makedirs(out_dir, exist_ok=True)
+
+    subgoals_data = json.load(open(subgoals_path, 'r')) if subgoals_path is not None else None
 
     for demo_name in tqdm(demo_names, desc="Demos"):
         demo = h5_file[demo_name]
@@ -371,6 +374,7 @@ def _plot_reward_curves(h5_file, demo_names, subgoals_data=None, output_dir=None
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Inspect H5 file structure and optionally create visualizations/videos")
     parser.add_argument("filepath", type=str, help="Path to H5 file")
+    parser.add_argument("--print_structure", action="store_true", help="Print the structure of the H5 file")
     parser.add_argument("--vis", action="store_true", help="Save per-trajectory videos")
     parser.add_argument("--sample_traj", action="store_true", help="Create trajectory plot images")
     parser.add_argument("--stats", action="store_true", help="Create txt file with dataset stats")
@@ -415,9 +419,13 @@ if __name__ == "__main__":
                 item = demo[key]
                 _display_item_recursive(item, key, indent=6)
 
+        if args.print_structure:
+            print("\nFile structure inspection complete. Exiting as --print_structure flag is set.")
+            exit(0)
+
         # save videos if requested
         if args.vis:
-            _save_demo_videos(f, demo_names, output_dir=args.output_path, subgoals_data=subgoals_data)
+            _save_demo_videos(f, demo_names, output_dir=args.output_path, subgoals_data=subgoals_path)
 
         # create output path for plots and stats
         dir_name = os.path.dirname(args.filepath).split("/")[-1]

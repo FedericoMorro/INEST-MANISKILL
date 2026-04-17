@@ -11,6 +11,7 @@ import gymnasium as gym
 from types import MethodType
 import inspect
 import imageio
+import h5py
 
 from stable_baselines3 import SAC
 
@@ -183,8 +184,50 @@ def _save_reward_plot(plot_path, step_rewards, subgoal_idxs=None):
     except Exception as e:
         logging.error(f"Error saving reward plot {plot_path}: {e}")
 
+def _save_trajectory_h5(h5_path, json_path, env, episodes_data):
+    """Save evaluation trajectories to H5 and metadata to JSON for replay compatibility."""
+    try:
+        # Save metadata JSON
+        json_data = {
+            "env_info": {
+                "env_id": env.unwrapped.spec.id,
+                "env_kwargs": {
+                    "sim_backend": getattr(env.unwrapped.backend, 'sim_backend', 'physx_cpu'),
+                    "obs_mode": env.unwrapped.obs_mode,
+                    "control_mode": env.unwrapped.control_mode,
+                },
+                "max_episode_steps": env.spec.max_episode_steps if env.spec else 100,
+            },
+            "episodes": []
+        }
+        
+        # Save trajectories to H5
+        with h5py.File(h5_path, 'w') as f:
+            for episode_id, data in enumerate(episodes_data):
+                actions = data.get('actions', [])
+                if len(actions) > 0:
+                    actions_array = np.array(actions, dtype=np.float32)
+                    f.create_dataset(f'traj_{episode_id}/actions', data=actions_array, compression='gzip')
+                
+                json_data["episodes"].append({
+                    "episode_id": episode_id,
+                    "episode_seed": data.get('seed', 0),
+                    "reset_kwargs": {"seed": data.get('seed', 0)},
+                    "control_mode": env.unwrapped.control_mode,
+                    "elapsed_steps": data.get('elapsed_steps', 0),
+                })
+        
+        with open(json_path, 'w') as f:
+            json.dump(json_data, f, indent=2)
+        
+        logging.info(f"Saved trajectory H5 to {h5_path} and metadata to {json_path}")
+    except Exception as e:
+        logging.error(f"Error saving trajectory H5: {e}")
+        import traceback
+        traceback.print_exc()
+
 def _run_episode(model, env, video_path=None, save_video=True):
-    """Run single evaluation episode manually, optionally recording video."""
+    """Run single evaluation episode manually, optionally recording video and collecting actions."""
     reset_result = env.reset()
     if isinstance(reset_result, tuple):
         obs, info = reset_result
@@ -197,9 +240,11 @@ def _run_episode(model, env, video_path=None, save_video=True):
     step_rewards = []
     frames = []
     subgoal_idxs = []
+    actions = []
     
     while step_count < HORIZON:
         action, _ = model.predict(obs, deterministic=DETERMINISTIC)
+        actions.append(action)
         step_result = env.step(action)
         
         if len(step_result) == 5:
@@ -231,7 +276,7 @@ def _run_episode(model, env, video_path=None, save_video=True):
     if video_path and frames:
         _save_video(video_path, frames)
     
-    return episode_reward, step_count, len(frames), step_rewards, subgoal_idxs
+    return episode_reward, step_count, len(frames), step_rewards, subgoal_idxs, actions
 
 
 def _create_plots(results, output_dir):
@@ -332,9 +377,10 @@ def main():
     logging.info(f"Loading checkpoint from {checkpoint_dir}...")
     model = SAC.load(checkpoint_dir, device=device)
 
-    # Create output directories
-    parent_dir = os.path.dirname(checkpoint_dir)
-    results_dir = os.path.join(parent_dir, "eval_results")
+    # Create output directories: parent/eval_results/{model_basename}/
+    model_basename = os.path.basename(checkpoint_dir).split('.')[0]
+    parent_dir = os.path.dirname(os.path.dirname(checkpoint_dir))
+    results_dir = os.path.join(parent_dir, "eval_results", model_basename)
     traj_dir = os.path.join(results_dir, "trajs") if args.save_video else None
     if traj_dir:
         os.makedirs(traj_dir, exist_ok=True)
@@ -346,19 +392,27 @@ def main():
     lengths = []
     frame_counts = []
     subgoal_idxs_all = []
+    episodes_data = []
 
     for episode_num in range(args.num_episodes):
         video_path = None
         if args.save_video and traj_dir:
             video_path = os.path.join(traj_dir, f"{episode_num}.mp4")
         
-        episode_reward, episode_length, frame_count, step_rewards, subgoal_idxs = _run_episode(
+        episode_reward, episode_length, frame_count, step_rewards, subgoal_idxs, actions = _run_episode(
             model, eval_env, video_path, save_video=args.save_video
         )
         rewards.append(episode_reward)
         lengths.append(episode_length)
         frame_counts.append(frame_count)
         subgoal_idxs_all.append(subgoal_idxs)
+        
+        # Store trajectory data for H5 saving
+        episodes_data.append({
+            'seed': 22 + episode_num,
+            'elapsed_steps': episode_length,
+            'actions': actions,
+        })
         
         # Save reward curve plot
         if args.save_video and traj_dir:
@@ -404,11 +458,17 @@ def main():
         json.dump(results, f, indent=2)
     logging.info(f"Results saved to {results_path}")
 
+    # Save trajectories to H5 for replay compatibility
+    h5_path = os.path.join(results_dir, "trajectories.h5")
+    json_traj_path = os.path.join(results_dir, "trajectories.json")
+    _save_trajectory_h5(h5_path, json_traj_path, eval_env, episodes_data)
+
     # Create plots
     _create_plots(results, results_dir)
 
     eval_env.close()
     logging.info("Evaluation complete!")
+
 
 
 if __name__ == "__main__":

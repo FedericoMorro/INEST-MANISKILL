@@ -1,0 +1,23 @@
+# Configuration for h5_to_dataset.py
+# Defines which keys to extract from the h5 file
+
+# Split ratio for train/val sets
+train_split: 0.9
+
+# Path to observation images
+obs_key: 'obs/sensor_data/base_camera/rgb'
+
+# Action keys to extract
+action_keys:
+  - 'actions'
+
+# Robot state keys to extract
+robot_state_keys:
+  - 'obs/agent/qpos'
+  - 'obs/agent/qvel'
+
+# Object state keys to extract
+objects_state_keys:
+  - 'env_states/actors/cubeA'
+  - 'env_states/actors/cubeB'
+  - 'env_states/actors/cubeC'

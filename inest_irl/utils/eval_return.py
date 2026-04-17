@@ -1,5 +1,18 @@
 """Compute and visualize learned reward signal based on goal embeddings."""
 
+"""
+Example usage:
+
+python inest_irl/utils/eval_return.py
+    --experiment_path ../data/inest-maniskill/_experiments/pretrain/render-cam/
+
+
+# for different trajs
+python inest_irl/utils/eval_return.py
+    --experiment_path ../data/inest-maniskill/_experiments/pretrain/render-cam/
+    --diff_trajs_dataset ../data/inest-maniskill/different-trajs/
+"""
+
 import os
 import typing
 from pathlib import Path
@@ -37,7 +50,7 @@ FS_LEGEND = 10
 FS_TRAJ_TITLE = 12
 
 
-def _setup(experiment_path, use_cpu):
+def _setup(experiment_path, use_cpu, diff_dataset_path=None):
   """Load the latest embedder checkpoint and dataloaders"""
 
   config = load_config_from_dir(experiment_path)
@@ -60,8 +73,15 @@ def _setup(experiment_path, use_cpu):
   
   # load data -> debug active if use_cpu, otherwise use GPU-optimized dataloader settings
   train_loader = common.get_downstream_dataloaders(config, debug=use_cpu)["train"]
-  valid_loader = common.get_downstream_dataloaders(config, debug=use_cpu)["valid"]
   #! note batch_size=1 is enforced in the dataloader
+
+  # if a different trajectory dataset path is provided, load it instead of the validation set for evaluation
+  if diff_dataset_path is not None:
+    print(f"Loading different trajectory dataset from: {diff_dataset_path}")
+    config.data.root = diff_dataset_path
+  else:
+    print("No different trajectory dataset provided - using validation set for evaluation")
+  valid_loader = common.get_downstream_dataloaders(config, debug=use_cpu)["valid"]
 
   # search for subgoal_frames.json to plot also subgoal rewards
   subgoal_frames_path = Path(config.data.root) / "subgoal_frames.json"
@@ -293,57 +313,6 @@ def plot_trajectory_lengths(lengths, output_dir):
   plt.close()
 
 
-def compute_rewards_from_videos(model, videos_folder, goal_emb, dist_scale, device):
-  """Compute reward signal for given videos given the goal embedding."""
-
-  def load_video_frames(video_path):
-    import cv2
-    cap = cv2.VideoCapture(video_path)
-    frames = []
-    while True:
-      ret, frame = cap.read()
-      if not ret:
-        break
-      frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-      # resize to 128x128 if needed
-      if frame_rgb.shape[:2] != (128, 128):
-        frame_rgb = cv2.resize(frame_rgb, (128, 128))
-      frames.append(frame_rgb)
-    cap.release()
-    frames_array = np.stack(frames, axis=0)  # shape: (seq_len, H, W, C)
-    frames_array = np.transpose(frames_array, (0, 3, 1, 2))  # shape: (seq_len, C, H, W)
-    frames_tensor = torch.from_numpy(frames_array).float().unsqueeze(0)  # shape: (1, seq_len, C, H, W)
-    
-    # save frames as png files (for comparison with dataset)
-    video_name = Path(video_path).stem
-    frames_dir = Path(videos_folder) / video_name
-    frames_dir.mkdir(exist_ok=True)
-    for i, frame in enumerate(frames):
-      frame_path = frames_dir / f"{i:d}.png"
-      cv2.imwrite(str(frame_path), cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
-    
-    return frames_tensor
-
-  rewards, traj_ids = [], []
-
-  video_files = [f for f in os.listdir(videos_folder) if f.endswith('.mp4')]
-  for video_file in tqdm(video_files, desc="Computing rewards from videos"):
-    traj_id = video_file.split('.')[0]
-    traj_ids.append(traj_id)
-
-    video_path = os.path.join(videos_folder, video_file)
-    frames = load_video_frames(video_path)
-
-    with torch.no_grad():
-      out = model.infer(frames.to(device))
-      traj_emb = out.numpy().embs  # shape: (seq_len, embedding_dim)
-      
-      dist = np.linalg.norm(goal_emb - traj_emb, axis=1)**2  # shape: (seq_len,)
-      rewards.append(- dist * dist_scale)
-
-  return rewards, traj_ids
-
-
 def main(args):
   # set random seeds for reproducibility
   torch.manual_seed(22)
@@ -356,12 +325,23 @@ def main(args):
   out_dir = os.path.join(args.output_dir, exp_name)
   os.makedirs(out_dir, exist_ok=True)
 
+  # if a different trajectory dataset is provided, create a subfolder for its results inside the experiment output directory
+  if args.diff_trajs_dataset is not None:
+    print(f"Evaluating reward signals on a different trajectory dataset: {args.diff_trajs_dataset}")
+    trajs_name = args.diff_trajs_dataset.strip('/').split('/')[-1]
+    out_dir = os.path.join(out_dir, trajs_name)
+    os.makedirs(out_dir, exist_ok=True)
+
   trajs_out_dir = os.path.join(out_dir, "trajs")
   os.makedirs(trajs_out_dir, exist_ok=True)
 
   # setup model and data
   print(f"Loading model from: {args.experiment_path}")
-  model, train_loader, valid_loader, subgoal_frames, device = _setup(args.experiment_path, args.use_cpu)
+  model, train_loader, valid_loader, subgoal_frames, device = _setup(
+    args.experiment_path, 
+    args.use_cpu, 
+    diff_dataset_path=args.diff_trajs_dataset
+  )
 
   # check for cached results in output directory
   cache_path = os.path.join(out_dir, 'rew_cache.pkl')
@@ -427,15 +407,6 @@ def main(args):
       for i, ts in enumerate(traj_substep):
         f.write(f"{i:>4.0f}: " + ", ".join([f"{t:3.0f}" for t in ts]) + "\n")
 
-  # negative trajectory sanity check plots if provided
-  if args.neg_trajs_path is not None:
-    neg_out_dir = os.path.join(out_dir, "neg_trajs")
-    os.makedirs(neg_out_dir, exist_ok=True)
-
-    neg_rewards, neg_traj_ids = compute_rewards_from_videos(model, args.neg_trajs_path, goal_emb, dist_scale, device)
-
-    plot_trajectory_samples(neg_rewards, neg_traj_ids, neg_out_dir, None, label="Learned Reward")
-
   print(f"All results saved to: {out_dir}")
 
 
@@ -453,8 +424,8 @@ if __name__ == "__main__":
                           help="Whether to save plots for learned rewards")
   arg_parser.add_argument("--no_plot_subgoal_trajs", action='store_true', default=False,
                           help="Whether to save plots for subgoal rewards and distances")
-  arg_parser.add_argument("--neg_trajs_path", type=str, default=None,
-                          help="Optional path to a folder with .mp4 videos of negative trajectories to check reward signal sanity")
+  arg_parser.add_argument("--diff_trajs_dataset", type=str, default=None,
+                          help="Optional path to another trajectory dataset directory to check reward signal sanity")
   args = arg_parser.parse_args()
 
   main(args)

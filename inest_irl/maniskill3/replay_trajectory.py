@@ -10,7 +10,8 @@ This is only supported for the StackPyramid environment using the CPU simulation
 """
 Example usage:
 
-- to replay trajs with RGB obses to build a dataset for vision-based pretraining
+
+# to replay trajs with RGB obses to build a dataset for vision-based pretraining
 
 python inest_irl/maniskill3/replay_trajectory.py
     --traj-path ../.maniskill/demos/StackPyramid-v1/motionplanning/trajectory.h5
@@ -23,7 +24,8 @@ python inest_irl/maniskill3/replay_trajectory.py
     [--cam-height 256]
     [--subtask-json]
 
-- to replay trajs with state_dict obses and get environmental rewards for analysis
+    
+# to replay trajs with state_dict obses and get environmental rewards for analysis
 
 python inest_irl/maniskill3/replay_trajectory.py
     --traj-path ../.maniskill/demos/StackPyramid-v1/motionplanning/trajectory.h5
@@ -33,6 +35,17 @@ python inest_irl/maniskill3/replay_trajectory.py
     --record-rewards
     [--count 100]
     [--num-envs 10]
+    [--subtask-json]
+
+    
+# for negative trajs
+
+python inest_irl/maniskill3/replay_trajectory.py
+    --traj-path experiments/sb3/<exp_name>/<exp_seed>/eval_results/<model_name>/trajectories.h5
+    --save-traj
+    --obs-mode rgb
+    --output-path ../data/inest-maniskill/negative-trajs
+    --save-unsuccessful
     [--subtask-json]
 """
 
@@ -137,6 +150,8 @@ class Args:
     """Whether to save a json file containing the subtask segmentation of the trajectory based on heuristic rules.
     This is only supported for the StackPyramid environment, WITHOUT action conversion, and using the CPU simulation backend.
     File will be called subgoal_frames.json."""
+    save_unsuccessful: bool = False
+    """Whether to save trajectories and videos even when episodes fail (unsuccessful replays)"""
 
 
 @dataclass
@@ -451,6 +466,13 @@ def replay_cpu_sim(
                 if subtask_enabled:
                     subtask_data[episode_id] = subgoal_frames
                 break
+            elif args.save_unsuccessful:
+                # Save unsuccessful replay without counting as successful
+                if args.save_traj:
+                    env.flush_trajectory()
+                if args.save_video:
+                    env.flush_video(ignore_empty_transition=False)
+                break
             else:
                 if args.verbose:
                     print("info", info)
@@ -474,10 +496,10 @@ def _main_helper(x):
 
 def _make_env(env_id, **kwargs):
     """Create env, overriding StackPyramid to use local custom implementation."""
-    if env_id == "StackPyramid-v1":
+    if "StackPyramid-v1" in env_id:
         import stack_pyramid as local_stack_pyramid
 
-        return local_stack_pyramid.StackPyramidEnv(env_reward_type="normalized_dense", randomize_cubes=True, **kwargs)
+        return local_stack_pyramid.StackPyramidEnv(env_reward_type="normalized_dense", randomize_cubes=False, **kwargs)
     return gym.make(env_id, **kwargs)
 
 

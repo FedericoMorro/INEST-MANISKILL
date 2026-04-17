@@ -20,7 +20,7 @@ egocentric_dataset/
 
 # Ignore output files and training checkpoints.
 out/*
-experiments/*
+experiments/*/
 prev_experiments/*
 
 
