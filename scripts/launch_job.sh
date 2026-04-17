@@ -1,5 +1,7 @@
 #!/bin/bash
 
+export SLURM_EXCLUDE_NODES=compute-3-11
+
 QUEUE_TIME=$(date +%Y.%m.%d-%H.%M.%S)
 
 mkdir -p ${HOME}/logs
@@ -16,7 +18,7 @@ export REPLAY_BUFFER_CAPACITY="1_000_000"
 export ACTOR_LR="3e-4"
 export CRITIC_LR="1e-4"
 export ALPHA_LR="3e-4"
-export DISCOUNT="0.995"
+export DISCOUNT="0.93"
 export TARGET_ENTROPY="-3.5"
 export STD_ACTION_NOISE="0.0"
 export ANNEAL_TARGET_ENTROPY="False"
@@ -47,6 +49,7 @@ if [[ "$1" == "inest" ]]; then
         --gres=gpu:1 \
         --output=${HOME}/logs/%j_${EXPERIMENT_NAME}_inest.out \
         --error=${HOME}/logs/%j_${EXPERIMENT_NAME}_inest.err \
+        --exclude=$SLURM_EXCLUDE_NODES \
         /home/fmorro/INEST-MANISKILL/scripts/submit_inest_train.sh
 else
     echo "Unknown argument: $1. Please specify 'inest' to submit the INEST MANISKILL RL training job."

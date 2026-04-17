@@ -283,12 +283,10 @@ class StackPyramidEnv(BaseEnv):
 
 
     def reset(self, **kwargs):
-        # if None passed, init seed will be used, since sb3 pipeline sometimes passes seed=None during reset
-        if kwargs.get("seed") is None:
-            del kwargs["seed"]
-            obs, info = super().reset(seed=self.seed, **kwargs)
-        else:
-            obs, info = super().reset(**kwargs)
+        self.step_count = 0
+
+        #! equal seed at reset => same env reset
+        obs, info = super().reset(**kwargs)
 
         # init subgoal tracking at the beginning of the episode
         self.prev_cubeA_pos = self.cubeA.pose.p
@@ -299,14 +297,19 @@ class StackPyramidEnv(BaseEnv):
 
     def step(self, action):
         obs, reward, terminated, truncated, info = super().step(action)
+        self.step_count += 1
 
         # update subgoal success and add it to info
         self._update_subgoal_success()
         info["subgoal"] = self.curr_subgoal
 
         if ENFORCE_FULL_EPISODES:
-            terminated = torch.tensor([False], device=self.device)
-            truncated = torch.tensor([False], device=self.device)
+            if self.step_count < HORIZON:
+                terminated = torch.tensor([False], device=self.device)
+                truncated = torch.tensor([False], device=self.device)
+            else:
+                terminated = torch.tensor([True], device=self.device)
+                truncated = torch.tensor([True], device=self.device)
             
         return obs, reward, terminated, truncated, info
 

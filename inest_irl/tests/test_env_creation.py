@@ -7,6 +7,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
+import copy
 import gymnasium as gym
 import numpy as np
 from PIL import Image
@@ -52,21 +53,8 @@ def main():
     
     # Reset environment to get initial state
     print("\nResetting environment...")
-    reset_result = env.reset()
-    
-    # Handle different wrapper return formats
-    if isinstance(reset_result, tuple):
-        if len(reset_result) == 2:
-            obs, info = reset_result
-        elif len(reset_result) == 3:
-            # FrameStack returns (obs, info, state) or similar
-            obs, info, _ = reset_result
-        else:
-            obs = reset_result[0]
-            info = reset_result[1] if len(reset_result) > 1 else {}
-    else:
-        obs = reset_result
-        info = {}
+    obs, info = env.reset()
+    init_obs = copy.deepcopy(obs)
     
     print("\nInitial state captured!")
     print(f"\nObservation keys: {obs.keys() if isinstance(obs, dict) else 'array'}")
@@ -120,8 +108,8 @@ def main():
         print("  No render output available")
     
     # Run a few steps to see environment in action
-    print("\nRunning 5 random action steps...")
-    for step in range(5):
+    print("\nRunning 100 random action steps...")
+    for step in range(100):
         action = env.action_space.sample()
         step_result = env.step(action)
         
@@ -163,6 +151,13 @@ def main():
         if terminated or truncated:
             print("Episode ended!")
             break
+
+    obs, info = env.reset()
+    init_obs_after_episode = copy.deepcopy(obs)
+
+    print(f"Initial observation before episode: {init_obs}")
+    print(f"Initial observation after episode: {init_obs_after_episode}")
+    print(f"Observations match: {np.array_equal(init_obs, init_obs_after_episode)}")
     
     env.close()
     print("\nTest completed!")

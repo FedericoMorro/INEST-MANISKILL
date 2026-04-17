@@ -319,7 +319,8 @@ def main():
     logging.info(f"Creating environment: {config.env_name}")
     eval_env = utils.make_env(
         config.env_name,
-        seed=42,
+        seed=22,
+        env_reward_type="normalized_dense",
         action_repeat=config.action_repeat,
         frame_stack=config.frame_stack,
     )
