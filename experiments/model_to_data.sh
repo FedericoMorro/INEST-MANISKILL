@@ -135,11 +135,11 @@ fi
 if [ -n "$eval_learned_return_model" ]; then
     print_with_border "EVALUATING LEARNED RETURNS"
 
-    python inest_irl/utils/eval_learned_return.py \
+    python inest_irl/utils/compute_learned_return.py \
         --experiment_path "$eval_learned_return_model" \
         --output_dir "${output_path}/learned_return_evaluation" \
         --diff_trajs_dataset ${output_dataset_dir} \
-        --no_plot_trajs
+        --plot_subgoal_dists
 else
     echo "Not evaluating learned returns. To evaluate returns, rerun the script with the --eval_learned_return_model <dir> flag."
 fi

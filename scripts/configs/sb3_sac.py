@@ -39,13 +39,13 @@ def get_config():
   config.frame_stack = 3
 
   config.reward_wrapper = ml_collections.ConfigDict()
-  # config.reward_wrapper.pretrained_path = "/home/liannello/xirl/experiment_results/6Subtask/Allocentric_Pretrain/dataset=xmagical_mode=same_algo=xirl_embodiment=gripper_ALLO_6Subtasks"
-  config.reward_wrapper.pretrained_path = "/home/fmorro/INEST-MANISKILL/experiments/pretrain/batch-4"
   # Can be one of ['distance_to_goal', 'goal_classifier', 'inest', 'inest_knn', 'state_intrinsic', 'reds'].
-  #   currently supported -> ['sparse', 'env', 'env_state-intrinsic']
-  config.reward_wrapper.type = "env"
+  #   currently supported -> ['sparse', 'env', 'env_state-intrinsic', 'goal_dist']
+  config.reward_wrapper.type = "goal_dist"
+  # Needed if using a vision-based learned reward wrapper
+  config.reward_wrapper.pretrained_path = "/data/fmorro/inest-maniskill/_experiments/pretrain/render-cam/"
 
-  # Vector environment parameters for DDP
+  # Number of parallel environments to use for training
   config.num_envs = 32
 
   # ================================================= #
@@ -68,7 +68,7 @@ def get_config():
   config.sac.obs_dim = obs_dim
   config.sac.action_dim = action_dim
   config.sac.action_range = action_range
-  config.sac.discount = 0.995
+  config.sac.discount = 0.95
   config.sac.init_temperature = 1.0
   config.sac.alpha_lr = 3e-4
   config.sac.alpha_betas = [0.9, 0.999]

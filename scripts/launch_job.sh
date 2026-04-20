@@ -14,14 +14,16 @@ fi
 
 export EXPERIMENT_NAME="$2"
 export RND_SEED="22"
+export REWARD_WRAPPER_TYPE="goal_dist"
 export REPLAY_BUFFER_CAPACITY="1_000_000"
 export ACTOR_LR="3e-4"
 export CRITIC_LR="1e-4"
 export ALPHA_LR="3e-4"
-export DISCOUNT="0.925"
+export DISCOUNT="0.9"
 export TARGET_ENTROPY="-3.5"
 export STD_ACTION_NOISE="0.0"
 export ANNEAL_TARGET_ENTROPY="False"
+export REWARD_WRAPPER_PRETRAINED_PATH="/home/fmorro/INEST-MANISKILL/experiments/pretrain/render-cam/"
 
 if [[ "$1" == "inest" ]]; then
     echo "Submitting INEST MANISKILL RL training job..."

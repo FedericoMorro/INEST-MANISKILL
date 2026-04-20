@@ -37,9 +37,9 @@ ModelType = SelfSupervisedModel
 DataLoaderType = typing.Dict[str, torch.utils.data.DataLoader]
 
 
-C_VALUE = 3.0   # additional reward for reaching any subgoal
-DISTANCE_THRESHOLDS = [10, 10, 10, 10]  # distance threshold for considering a subgoal reached (in embedding space)
-PATIENCE_THRESHOLD = 2  # number of consecutive timesteps below distance threshold to consider subgoal reached
+C_VALUE = 0.25   # additional reward for reaching any subgoal
+DISTANCE_THRESHOLDS = [3, 3, 3, 3]  # distance threshold for considering a subgoal reached (in embedding space)
+PATIENCE_THRESHOLD = 0  # number of consecutive timesteps below distance threshold to consider subgoal reached
 
 # report-friendly plotting defaults (compact figure size with readable text)
 FIGSIZE_TRAJ = (7.0, 3.6)
@@ -51,7 +51,7 @@ FS_LEGEND = 10
 FS_TRAJ_TITLE = 12
 
 
-def _setup(experiment_path, use_cpu, diff_dataset_path=None):
+def setup_from_pretrain(experiment_path, use_cpu, diff_dataset_path=None):
   """Load the latest embedder checkpoint and dataloaders"""
 
   config = load_config_from_dir(experiment_path)
@@ -155,7 +155,7 @@ def compute_reward_signals(model, valid_loader, goal_emb, subgoal_embs, dist_sca
       traj_emb = out.numpy().embs  # shape: (seq_len, embedding_dim)
       
       # compute euclidean distance from each frame to goal
-      dist = np.linalg.norm(goal_emb - traj_emb, axis=1)**2  # shape: (seq_len,)
+      dist = np.linalg.norm(goal_emb - traj_emb, axis=1)  # shape: (seq_len,)
 
       # learned reward is negative distance to goal, scaled by the average distance to goal in the training set
       rewards.append(- dist * dist_scale)
@@ -164,7 +164,7 @@ def compute_reward_signals(model, valid_loader, goal_emb, subgoal_embs, dist_sca
       if subgoal_embs is not None:
         for i, subgoal_emb in enumerate(subgoal_embs):
           subgoal_dists[i].append( 
-            np.linalg.norm(subgoal_emb - traj_emb, axis=1)**2  # shape: (seq_len,)
+            np.linalg.norm(subgoal_emb - traj_emb, axis=1)  # shape: (seq_len,)
           )
 
         # add them progressively at task completion
@@ -338,7 +338,7 @@ def main(args):
 
   # setup model and data
   print(f"Loading model from: {args.experiment_path}")
-  model, train_loader, valid_loader, subgoal_frames, global_step, device = _setup(
+  model, train_loader, valid_loader, subgoal_frames, global_step, device = setup_from_pretrain(
     args.experiment_path, 
     args.use_cpu, 
     diff_dataset_path=args.diff_trajs_dataset

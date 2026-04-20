@@ -334,7 +334,13 @@ class VideoRecorder(gym.Wrapper):
 class RewardWrapper(gym.Wrapper):
     """Base class for reward wrappers that compute a modified reward based on the environment reward and/or other info."""
 
-    def __init__(self, env, rank, train_flag, exp_dir, index_seed_step=0):
+    def __init__(self,
+        env,
+        rank,
+        train_flag,
+        exp_dir,
+        index_seed_step=0
+    ):
         super().__init__(env)
         self.index_seed_step = index_seed_step
         self.rank = rank
@@ -399,8 +405,123 @@ class EnvironmentRewardWrapper(RewardWrapper):
     """Compatibility wrapper that keeps raw environment rewards."""
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        print("Initialized EnvironmentRewardWrapper")
+        
+        
+class LearnedVisualRewardWrapper(RewardWrapper):
+    """Base wrapper class that replaces the env reward with a learned one.
+    Subclasses should implement the `_get_reward_from_image` method.
+    """
+
+    def __init__(self,
+        *args,
+        model,  # model that ingests RGB frames and returns embeddings, subclass of `xirl.models.SelfSupervisedModel`.
+        device,
+        res_hw = None,      # optional (H, W) to resize the environment image before feeding it to the model.
+        **kwargs
+    ):
+        super().__init__(*args, **kwargs)
+        self.device = device
+        self.model = model.to(device).eval()
+        self.res_hw = res_hw
+        print(f"Initialized LearnedVisualRewardWrapper with model {model.__class__.__name__} on device {device} and res_hw={res_hw}")
+
+    def _to_tensor(self, x):
+        x = torch.from_numpy(x).permute(2, 0, 1).float()[None, None, Ellipsis]
+        # TODO(kevin): Make this more generic for other preprocessing.
+        x = x / 255.0
+        x = x.to(self.device)
+        return x
+
+    def _render_obs(self):
+        """Render the pixels at the desired resolution."""
+        # TODO(kevin): Make sure this works for mujoco envs.
+        pixels = self.env.render()
+
+        # Handle dict/list outputs (maniskill may return multiple cameras)
+        if isinstance(pixels, dict):
+            pixels = next(iter(pixels.values()))
+        elif isinstance(pixels, (list, tuple)):
+            pixels = pixels[0]
+
+        # Convert torch.Tensor -> numpy
+        if isinstance(pixels, torch.Tensor):
+            pixels = pixels.detach().cpu().numpy()
+
+        # Handle batched ManiSkill outputs like (num_envs, H, W, 3) or (num_envs, cams, H, W, 3)
+        if isinstance(pixels, np.ndarray):
+            if pixels.ndim == 4 and pixels.shape[-1] == 3:
+                pixels = pixels[0]
+            elif pixels.ndim == 5 and pixels.shape[-1] == 3:
+                pixels = pixels[0, 0]
+
+            # Convert float images to uint8 if needed
+            if pixels.dtype != np.uint8:
+                try:
+                    fmin, fmax = float(pixels.min()), float(pixels.max())
+                except Exception:
+                    # If we can't compute min/max, fall back to clipping
+                    pixels = np.clip(pixels, 0, 255).astype(np.uint8)
+                else:
+                    if fmin >= 0.0 and fmax <= 1.0:
+                        pixels = (pixels * 255).astype(np.uint8)
+                    elif fmin >= -1.0 and fmax <= 1.0:
+                        pixels = ((pixels + 1.0) / 2.0 * 255).astype(np.uint8)
+                    else:
+                        pixels = np.clip(pixels, 0, 255).astype(np.uint8)
+        else:
+            # Unknown render output type -> return None so callers can handle it
+            return None
+
+        # Resize if requested
+        if self.res_hw is not None:
+            h, w = self.res_hw
+            # Ensure contiguous array of correct dtype for OpenCV
+            pixels = np.ascontiguousarray(pixels)
+            pixels = cv2.resize(pixels, dsize=(w, h), interpolation=cv2.INTER_CUBIC)
+
+        return pixels
+
+    @abc.abstractmethod
+    def _get_reward_from_image(self, image):
+        """Forward the pixels through the model and compute the reward."""
+
+    def step(self, action):
+        obs, reward, terminated, truncated, info = super().step(action)
+        
+        pixels = self._render_obs()
+        learned_reward = self._get_reward_from_image(pixels)
+        
+        return obs, learned_reward, terminated, truncated, info
 
 
+class GoalDistanceLearnedVisualRewardWrapper(LearnedVisualRewardWrapper):
+  """Replace the environment reward with distances in embedding space."""
+
+  def __init__(
+      self,
+      goal_emb,
+      dist_scale,
+      **kwargs,
+  ):
+    super().__init__(**kwargs)
+
+    self.goal_emb = np.atleast_2d(goal_emb)
+    self.dist_scale = dist_scale
+    print(f"Initialized GoalDistanceLearnedVisualRewardWrapper with goal_emb shape {self.goal_emb.shape} and distance_scale {dist_scale}")
+
+  def _get_reward_from_image(self, image):
+    """Forward the pixels through the model and compute the reward."""
+    # print("Computing reward from image dist.")
+    image_tensor = self._to_tensor(image)
+    emb = self.model.infer(image_tensor).numpy().embs
+    # emb = self._model.module.infer(image_tensor).numpy().embs
+    dist = np.linalg.norm(self.goal_emb - emb)
+    rew = - dist * self.dist_scale
+    return rew
+
+
+# TODO: NOT TESTED
 class StateIntrinsicEnvironmentRewardWrapper(RewardWrapper):
     """Compatibility wrapper that adds a state-based intrinsic reward to the environment reward."""
     def __init__(
@@ -833,146 +954,7 @@ class StateIntrinsicEnvironmentRewardWrapper(RewardWrapper):
 # staging buffer which is forwarded as a batch through the GPU.
 
 
-class LearnedVisualReward(abc.ABC, gym.Wrapper):
-  """Base wrapper class that replaces the env reward with a learned one.
-
-  Subclasses should implement the `_get_reward_from_image` method.
-  """
-
-  def __init__(
-      self,
-      env,
-      model,
-      device,
-      index_seed_step = 0,
-      res_hw = None,
-  ):
-    """Constructor.
-
-    Args:
-      env: A gym env.
-      model: A model that ingests RGB frames and returns embeddings. Should be a
-        subclass of `xirl.models.SelfSupervisedModel`.
-      device: Compute device.
-      res_hw: Optional (H, W) to resize the environment image before feeding it
-        to the model.
-    """
-    super().__init__(env)
-
-    self._device = device
-    self._model = model.to(device).eval()
-    self._res_hw = res_hw
-
-  def _to_tensor(self, x):
-    x = torch.from_numpy(x).permute(2, 0, 1).float()[None, None, Ellipsis]
-    # TODO(kevin): Make this more generic for other preprocessing.
-    x = x / 255.0
-    x = x.to(self._device)
-    return x
-
-  def _render_obs(self):
-    """Render the pixels at the desired resolution."""
-    # TODO(kevin): Make sure this works for mujoco envs.
-    pixels = self.env.render(mode="rgb_array")
-
-    # Handle dict/list outputs (maniskill may return multiple cameras)
-    if isinstance(pixels, dict):
-        pixels = next(iter(pixels.values()))
-    elif isinstance(pixels, (list, tuple)):
-        pixels = pixels[0]
-
-    # Convert torch.Tensor -> numpy
-    if isinstance(pixels, torch.Tensor):
-        pixels = pixels.detach().cpu().numpy()
-
-    # Handle batched ManiSkill outputs like (num_envs, H, W, 3) or (num_envs, cams, H, W, 3)
-    if isinstance(pixels, np.ndarray):
-        if pixels.ndim == 4 and pixels.shape[-1] == 3:
-            pixels = pixels[0]
-        elif pixels.ndim == 5 and pixels.shape[-1] == 3:
-            pixels = pixels[0, 0]
-
-        # Convert float images to uint8 if needed
-        if pixels.dtype != np.uint8:
-            try:
-                fmin, fmax = float(pixels.min()), float(pixels.max())
-            except Exception:
-                # If we can't compute min/max, fall back to clipping
-                pixels = np.clip(pixels, 0, 255).astype(np.uint8)
-            else:
-                if fmin >= 0.0 and fmax <= 1.0:
-                    pixels = (pixels * 255).astype(np.uint8)
-                elif fmin >= -1.0 and fmax <= 1.0:
-                    pixels = ((pixels + 1.0) / 2.0 * 255).astype(np.uint8)
-                else:
-                    pixels = np.clip(pixels, 0, 255).astype(np.uint8)
-    else:
-        # Unknown render output type -> return None so callers can handle it
-        return None
-
-    # Resize if requested
-    if self._res_hw is not None:
-        h, w = self._res_hw
-        # Ensure contiguous array of correct dtype for OpenCV
-        pixels = np.ascontiguousarray(pixels)
-        pixels = cv2.resize(pixels, dsize=(w, h), interpolation=cv2.INTER_CUBIC)
-
-    return pixels
-
-  @abc.abstractmethod
-  def _get_reward_from_image(self, image):
-    """Forward the pixels through the model and compute the reward."""
-
-  def step(self, action):
-    result = self.env.step(action)
-    if len(result) == 5:
-            obs, env_reward, terminated, truncated, info = result
-            done = _merge_done(terminated, truncated)
-    else:
-            obs, env_reward, done, info = result
-    # We'll keep the original env reward in the info dict in case the user would
-    # like to use it in conjunction with the learned reward.
-    info["env_reward"] = env_reward
-    pixels = self._render_obs()
-    learned_reward = self._get_reward_from_image(pixels)
-    
-    return obs, learned_reward, done, info
-
-
-class DistanceToGoalLearnedVisualReward(LearnedVisualReward):
-  """Replace the environment reward with distances in embedding space."""
-
-  def __init__(
-      self,
-      goal_emb,
-      distance_scale = 1.0,
-      **base_kwargs,
-  ):
-    """Constructor.
-
-    Args:
-      goal_emb: The goal embedding.
-      distance_scale: Scales the distance from the current state embedding to
-        that of the goal state. Set to `1.0` by default.
-      **base_kwargs: Base keyword arguments.
-    """
-    super().__init__(**base_kwargs)
-
-    self._goal_emb = np.atleast_2d(goal_emb)
-    self._distance_scale = distance_scale
-
-  def _get_reward_from_image(self, image):
-    """Forward the pixels through the model and compute the reward."""
-    # print("Computing reward from image dist.")
-    image_tensor = self._to_tensor(image)
-    emb = self._model.infer(image_tensor).numpy().embs
-    # emb = self._model.module.infer(image_tensor).numpy().embs
-    dist = -1.0 * np.linalg.norm(emb - self._goal_emb)
-    dist *= self._distance_scale
-    return dist
-
-
-class GoalClassifierLearnedVisualReward(LearnedVisualReward):
+class GoalClassifierLearnedVisualReward(LearnedVisualRewardWrapper):
   """Replace the environment reward with the output of a goal classifier."""
 
   def _get_reward_from_image(self, image):
@@ -984,7 +966,7 @@ class GoalClassifierLearnedVisualReward(LearnedVisualReward):
     return prob.item()
 
 
-class INESTIRLLearnedVisualReward(LearnedVisualReward):
+class INESTIRLLearnedVisualReward(LearnedVisualRewardWrapper):
     """INEST IRL learned visual reward with intrinsic motivation and coverage tracking."""
     def __init__(
         self,
@@ -1528,7 +1510,7 @@ class INESTIRLLearnedVisualReward(LearnedVisualReward):
 
         return obs, learned_reward, done, info
 
-class KNNINESTIRLLearnedVisualReward(LearnedVisualReward):
+class KNNINESTIRLLearnedVisualReward(LearnedVisualRewardWrapper):
     """INEST IRL learned visual reward with KNN-based intrinsic reward and coverage tracking."""
     def __init__(
         self,
@@ -2072,7 +2054,7 @@ class KNNINESTIRLLearnedVisualReward(LearnedVisualReward):
         return obs, learned_reward, done, info
     
 
-class STATEINTRINSICLearnedVisualReward(LearnedVisualReward):
+class STATEINTRINSICLearnedVisualReward(LearnedVisualRewardWrapper):
     '''Learned visual reward wrapper with state-based intrinsic motivation'''
     def __init__(
         self,
@@ -2684,7 +2666,7 @@ class STATEINTRINSICLearnedVisualReward(LearnedVisualReward):
         return obs, final_reward, done, info
 
     
-class REDSLearnedVisualReward(LearnedVisualReward):
+class REDSLearnedVisualReward(LearnedVisualRewardWrapper):
     """Replace the environment reward with the output of a REDS model."""
 
     def __init__(

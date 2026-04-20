@@ -15,11 +15,15 @@
 
 """Useful methods shared by all scripts."""
 
+import json
+import json
 import os
 import pickle
 import typing
 from typing import Any, Dict, Optional
 
+from click import Path
+from click import Path
 from absl import logging
 import gymnasium as gym
 from gymnasium.wrappers import RescaleAction
@@ -179,7 +183,7 @@ def load_model_checkpoint(pretrained_path, device):
   checkpoint_manager = CheckpointManager(checkpoint_dir, model=model)
   global_step = checkpoint_manager.restore_or_initialize()
   logging.info("Restored model from checkpoint %d.", global_step)
-  return config, model
+  return model, config, global_step
 
 
 def save_pickle(experiment_path, arr, name):
@@ -259,7 +263,7 @@ def make_env(
     obs_mode=obs_mode,
     control_mode="pd_ee_delta_pose", # pd_ee_delta_pos[e], with e includes also gripper quaternion orientation control
     render_mode="rgb_array",
-    env_reward_type=env_reward_type,
+    env_reward_type="normalized_dense",
   )
 
   if add_episode_monitor:
@@ -307,17 +311,45 @@ def wrap_env(env, env_reward_type, rank, train_flag, exp_dir, learned_reward_pre
   Returns:
     gym.Env object.
   """
-  print("Wrapping environment with learned reward wrapper...")
-  if env_reward_type in ["env", "sparse", "normalized_dense"]:
+  print("Wrapping environment...")
+  if env_reward_type == "env" or env_reward_type == "sparse":
     return wrappers.EnvironmentRewardWrapper(env, rank, train_flag, exp_dir)
   elif env_reward_type == "env_state-intrinsic":
     return wrappers.EnvironmentRewardStateIntrinsicWrapper(env, rank, train_flag, exp_dir)
-  else:
-     raise NotImplementedError(f"Reward wrapper type {env_reward_type} not implemented yet.")
 
   pretrained_path = learned_reward_pretrained_path
-  # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-  model_config, model = load_model_checkpoint(pretrained_path, device)
+  model, model_config, model_step = load_model_checkpoint(pretrained_path, device)
+  
+  cache_path = os.path.join(pretrained_path, "checkpoints", f"cached_embeddings_step_{model_step}.pkl")
+  if os.path.exists(cache_path):
+    print(f"Loading precomputed goal embedding from {cache_path}")
+    with open(cache_path, "rb") as fp:
+      goal_emb, subgoal_embs, dist_scale = pickle.load(fp)
+  else:
+    print("No precomputed goal embedding found, computing now...")
+    from inest_irl.utils.compute_learned_return import compute_goal_embedding
+    train_loader = common.get_downstream_dataloaders(model_config)["train"]
+    subgoal_frames_path = Path(model_config.data.root) / "subgoal_frames.json"
+    if subgoal_frames_path.exists():
+      with open(subgoal_frames_path, 'r') as f:
+        subgoal_frames = json.load(f)
+      print(f"Found subgoal frames file with {len(subgoal_frames)} trajectories - will compute and plot subgoal rewards")
+    else:
+      subgoal_frames = None
+      print("No subgoal frames file found - will only compute and plot rewards to final goal")
+    goal_emb, subgoal_embs, dist_scale = compute_goal_embedding(model, train_loader, device, subgoal_frames=subgoal_frames)
+    with open(cache_path, "wb") as fp:
+      pickle.dump((goal_emb, subgoal_embs, dist_scale), fp)
+    print(f"Computed and cached goal embedding at {cache_path}")
+  
+  if env_reward_type == "goal_dist":
+    return wrappers.GoalDistanceLearnedVisualRewardWrapper(
+      env=env, rank=rank, train_flag=train_flag, exp_dir=exp_dir,
+      model=model, device=device, #res_hw=model_config.data_augmentation.image_size,  -> should be already 128x128
+      goal_emb=goal_emb, dist_scale=dist_scale,
+    )
+  else:
+     raise NotImplementedError(f"Reward wrapper type {env_reward_type} not implemented yet.")
   
   if env_reward_type == "reds":
     print("Model loaded")

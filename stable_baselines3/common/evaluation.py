@@ -21,6 +21,7 @@ def evaluate_policy(
     warn: bool = True,
 
     return_episode_subgoals: bool = False,
+    return_env_reward: bool = False,
 
 ) -> tuple[float, float] | tuple[list[float], list[int]]:
     """
@@ -85,6 +86,9 @@ def evaluate_policy(
     if return_episode_subgoals:
         episodes_subgoals = []
         max_subgoal = env.get_attr("max_subgoal", 0)[0]
+        
+    if return_env_reward:
+        episode_env_rewards = []
 
     episode_counts = np.zeros(n_envs, dtype="int")
     # Divides episodes among different sub environments in the vector as evenly as possible
@@ -132,6 +136,8 @@ def evaluate_policy(
 
                             if return_episode_subgoals:
                                 episodes_subgoals.append(info.get("subgoal", 0))
+                            if return_env_reward:
+                                episode_env_rewards.append(info.get("env_reward", 0))
                                 
                     else:
                         episode_rewards.append(current_rewards[i])
@@ -140,6 +146,8 @@ def evaluate_policy(
 
                         if return_episode_subgoals:
                             episodes_subgoals.append(info.get("subgoal", 0))
+                        if return_env_reward:
+                            episode_env_rewards.append(info.get("env_reward", 0))
 
                     current_rewards[i] = 0
                     current_lengths[i] = 0
@@ -154,6 +162,9 @@ def evaluate_policy(
 
     if reward_threshold is not None:
         assert mean_reward > reward_threshold, "Mean reward below threshold: " f"{mean_reward:.2f} < {reward_threshold:.2f}"
+      
+        
+    additional_info = {}
 
     if return_episode_subgoals:
         # convert episodes_subgoals to dict
@@ -170,11 +181,18 @@ def evaluate_policy(
         # normalize by number of episodes
         for subgoal in episode_subgoals_dict:
             episode_subgoals_dict[subgoal] /= n_eval_episodes
-
+            
+        additional_info["episode_subgoals"] = episode_subgoals_dict
+        
+    if return_env_reward:
+        additional_info["episode_env_rewards"] = episode_env_rewards
+        
+    if additional_info:
         if return_episode_rewards:
-            return episode_rewards, episode_lengths, episode_subgoals_dict
-        return mean_reward, std_reward, episode_subgoals_dict
-
+            return episode_rewards, episode_lengths, additional_info
+        return mean_reward, std_reward, additional_info
+        
+        
     if return_episode_rewards:
         return episode_rewards, episode_lengths
     return mean_reward, std_reward

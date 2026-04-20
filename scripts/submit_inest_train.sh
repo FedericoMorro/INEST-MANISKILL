@@ -4,6 +4,7 @@ echo "====================================="
 echo "TRAINING HYPERPARAMETERS"
 echo " Experiment Name: $EXPERIMENT_NAME"
 echo " Random Seed: $RND_SEED"
+echo " Reward Wrapper Type: $REWARD_WRAPPER_TYPE"
 echo " Replay Buffer Capacity: $REPLAY_BUFFER_CAPACITY"
 echo " Actor LR: $ACTOR_LR"
 echo " Critic LR: $CRITIC_LR"
@@ -96,6 +97,8 @@ CMD="python /home/fmorro/INEST-MANISKILL/scripts/sb3_sac.py \
     --seed $RND_SEED \
     --wandb \
     --no_progress_bar \
+    --config.reward_wrapper.type=$REWARD_WRAPPER_TYPE \
+    --config.reward_wrapper.pretrained_path=$REWARD_WRAPPER_PRETRAINED_PATH \
     --config.replay_buffer_capacity=$REPLAY_BUFFER_CAPACITY \
     --config.sac.actor_lr=$ACTOR_LR \
     --config.sac.critic_lr=$CRITIC_LR \

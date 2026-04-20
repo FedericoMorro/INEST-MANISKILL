@@ -101,17 +101,18 @@ class WandbCallback(BaseCallback):
 
 class EvalSaveCallback(BaseCallback):
     """Periodic evaluation callback that saves returns, saves models, and logs to wandb."""
-    def __init__(self, eval_env, exp_dir, eval_freq, checkpoint_freq, n_eval_episodes=5, verbose=0):
+    def __init__(self, eval_env, exp_dir, eval_freq, checkpoint_freq, n_eval_episodes=5, verbose=0, learned_reward=False):
         super().__init__(verbose)
         self.eval_env = eval_env
         self.exp_dir = exp_dir
         self.eval_freq = eval_freq
         self.checkpoint_freq = checkpoint_freq
         self.n_eval_episodes = n_eval_episodes
+        self.learned_reward = learned_reward
         self._last_eval = 0
         self._last_checkpoint = 0
         self.best_mean_reward = float("-inf")
-
+        
     def _on_step(self) -> bool:
         try:
             step = int(self.num_timesteps)
@@ -123,24 +124,28 @@ class EvalSaveCallback(BaseCallback):
             self._last_eval = step
 
             try:
-                rewards, lengths, subgoals_dict = evaluate_policy(
+                rewards, lengths, additional_info = evaluate_policy(
                     self.model,
                     self.eval_env,
                     n_eval_episodes=self.n_eval_episodes,
                     deterministic=True,
                     return_episode_rewards=True,
                     return_episode_subgoals=True,
+                    return_env_reward=self.learned_reward,
                 )
                 mean_reward = float(np.mean(rewards))
                 std_reward = float(np.std(rewards))
                 mean_length = float(np.mean(lengths))
+                subgoals_dict = additional_info.get("episode_subgoals", {})
+                env_rewards = additional_info.get("episode_env_rewards", [])
             except Exception as e:
                 logging.warning(f"Evaluation failed at step {step}: {e}")
                 mean_reward = float("nan")
                 std_reward = float("nan")
                 mean_length = float("nan")
                 subgoals_dict = {}
-
+                env_rewards = []
+                
             # Save evaluation results to JSON
             eval_dir = os.path.join(self.exp_dir, "evaluation")
             os.makedirs(eval_dir, exist_ok=True)
@@ -153,6 +158,7 @@ class EvalSaveCallback(BaseCallback):
                         "mean_length": mean_length,
                         "rewards": rewards if isinstance(rewards, list) else list(rewards),
                         "subgoals": subgoals_dict,
+                        "env_rewards": env_rewards,
                     }, f, indent=2)
             except Exception:
                 pass
@@ -177,6 +183,10 @@ class EvalSaveCallback(BaseCallback):
                             log_dict[f"eval/failed_%"] = val
                         else:
                             log_dict[f"eval/subgoal_{subgoal}_%"] = val
+                            
+                    if env_rewards:
+                        log_dict["eval/mean_env_reward"] = float(np.mean(env_rewards))
+                        log_dict["eval/std_env_reward"] = float(np.std(env_rewards))
 
                     wandb.log(log_dict, step=step)
                 except Exception:
@@ -218,7 +228,7 @@ def _make_env_wrapper(config, seed, rank, train_flag, device, exp_dir):
     return utils.make_env(
         env_name=config.env_name,
         seed=seed,
-        env_reward_type="normalized_dense" if config.reward_wrapper.type == "env" else "sparse",
+        env_reward_type=config.reward_wrapper.type,
         obs_mode="state" if config.reward_wrapper.type != "sparse" else "state_dict",
         frame_stack=config.frame_stack,
         action_repeat=config.action_repeat,
@@ -235,6 +245,7 @@ def _make_env_wrapper(config, seed, rank, train_flag, device, exp_dir):
 def main(_):
     # get config
     config = FLAGS.config
+    config.save_dir = f"{config.save_dir}-lr" if config.reward_wrapper.type not in ["sparse", "env", "env_state-intrinsic"] else config.save_dir
     exp_dir = os.path.join(
         config.save_dir,
         FLAGS.experiment_name,
@@ -264,8 +275,13 @@ def main(_):
 
     # setup W&B logging
     if FLAGS.wandb:
+        if config.reward_wrapper.type in ["sparse", "env", "env_state-intrinsic"]:
+            wandb_project = "StackPyramid-SAC"
+        else:
+            wandb_project = "StackPyramid-SAC-LearnedReward"
+        
         wandb.init(
-            project="StackPyramid-SAC",
+            project=wandb_project,
             group="SAC-baseline",
             name=FLAGS.experiment_name,
             config={
@@ -411,6 +427,7 @@ def main(_):
             checkpoint_freq=int(config.checkpoint_frequency),
             n_eval_episodes=int(config.num_eval_episodes),
             verbose=1,
+            learned_reward=(config.reward_wrapper.type not in ["sparse", "env", "env_state-intrinsic"]),
         )
     )
     logging.info(f"Evaluation frequency: {config.eval_frequency} steps")
