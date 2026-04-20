@@ -28,7 +28,8 @@ from mani_skill.utils.structs.pose import Pose
 HORIZON = 100
 ENFORCE_FULL_EPISODES = True
 DEFAULT_RANDOMIZE_CUBES = True
-SUCCESS_REWARD = 2.0
+SUCCESS_REWARD = 1.5
+N_STEP_DENSE_REWARD = 3
 
 
 @register_env("StackPyramid-v1custom", max_episode_steps=HORIZON)
@@ -369,49 +370,109 @@ class StackPyramidEnv(BaseEnv):
         success_C_B = self._evaluate_cube_distance(offset_BC, self.cubeC, self.cubeB, "top")
         success_C_A = self._evaluate_cube_distance(offset_AC, self.cubeC, self.cubeA, "top")
         success = torch.logical_and(success_A_B, torch.logical_and(success_C_B, success_C_A))
-
-        # identify current step
-        if success:
-            current_step = 2
-        elif success_A_B:
-            current_step = 1
-        else:
-            current_step = 0
-
-        # compute reward based on the step
-        if current_step == 0:
-            # reward based on distance of eef to cube A, and distance of cube A to cube B
-            distance_eef_A = torch.linalg.norm(eef_pos - pos_A)
-            distance_AB = torch.linalg.norm(offset_AB)
-            
-            # in [-1,0], equal component contribution
-            reward = -1.0 + (
-                self._distance_to_reward(distance_eef_A) +
-                self._distance_to_reward(distance_AB)
-            ) / 1.5
-            reward -= 0.7
-
-        elif current_step == 1:
-            # reward based on distance of eef to cube C, and distance of cube C to cube A and B,
-            #   with height penalty if cube C is below 0.02 above the table
-            distance_eef_C = torch.linalg.norm(eef_pos - pos_C)
-            distance_AC = torch.linalg.norm(offset_AC)
-            distance_BC = torch.linalg.norm(offset_BC)
-            z_flag = torch.abs(offset_BC[..., 2]) > 0.02
-            grasp_flag = self.agent.is_grasping(self.cubeC) or z_flag
-            # give reward even if not grasping but above threshold to avoid decrease when releasing cube C after stacking
-
-            # in [0,1], equal contribution eef-C, AB-to-C, grasp+height bonus
-            reward = (
-                self._distance_to_reward(distance_eef_C) * 2.0 +
-                (self._distance_to_reward(distance_AC) + self._distance_to_reward(distance_BC)) +
-                (z_flag.float() + grasp_flag.float()) / 2.0
-            ) / 3.0
-            reward -= 0.7
-
-        else:
-            reward = SUCCESS_REWARD
         
+        if N_STEP_DENSE_REWARD == 3.0:
+            # identify current step
+            if success:
+                current_step = 2
+            elif success_A_B:
+                current_step = 1
+            else:
+                current_step = 0
+
+            # compute reward based on the step
+            if current_step == 0:
+                # reward based on distance of eef to cube A, and distance of cube A to cube B
+                distance_eef_A = torch.linalg.norm(eef_pos - pos_A)
+                distance_AB = torch.linalg.norm(offset_AB)
+                
+                # in [-1,0], equal component contribution
+                reward = -1.0 + (
+                    self._distance_to_reward(distance_eef_A) +
+                    self._distance_to_reward(distance_AB)
+                ) / 1.5
+                reward -= 0.7
+
+            elif current_step == 1:
+                # reward based on distance of eef to cube C, and distance of cube C to cube A and B,
+                #   with bonus reward for grasping and lifting cube C
+                distance_eef_C = torch.linalg.norm(eef_pos - pos_C)
+                distance_AC = torch.linalg.norm(offset_AC)
+                distance_BC = torch.linalg.norm(offset_BC)
+                z_flag = torch.abs(offset_BC[..., 2]) > 0.02
+                grasp_flag = self.agent.is_grasping(self.cubeC) or z_flag
+                # give reward even if not grasping but above threshold to avoid decrease when releasing cube C after stacking
+
+                # in [0,1], equal contribution eef-C, AB-to-C, grasp+height bonus
+                reward = (
+                    self._distance_to_reward(distance_eef_C) * 2.0 +
+                    (self._distance_to_reward(distance_AC) + self._distance_to_reward(distance_BC)) +
+                    (z_flag.float() + grasp_flag.float()) / 2.0
+                ) / 3.0
+                reward -= 0.7
+
+            else:
+                reward = SUCCESS_REWARD
+                
+                
+        elif N_STEP_DENSE_REWARD == 4.0:
+            z_flag = torch.abs(offset_BC[..., 2]) > 0.02
+            
+            # identify current step
+            if success:
+                current_step = 3
+            elif z_flag and success_A_B:
+                current_step = 2
+            elif success_A_B:
+                current_step = 1
+            else:
+                current_step = 0
+
+            # compute reward based on the step
+            if current_step == 0:
+                # reward based on distance of eef to cube A, and distance of cube A to cube B
+                distance_eef_A = torch.linalg.norm(eef_pos - pos_A)
+                distance_AB = torch.linalg.norm(offset_AB)
+                
+                # in [-1.5,-0.5], equal component contribution
+                reward = -1.0 + (
+                    self._distance_to_reward(distance_eef_A) +
+                    self._distance_to_reward(distance_AB)
+                ) / 1.5
+                reward += - 0.7 - 0.5
+
+            elif current_step == 1:
+                # reward based on distance of eef to cube C, with grasping and lifting bonus
+                distance_eef_C = torch.linalg.norm(eef_pos - pos_C)
+                z_flag = torch.abs(offset_BC[..., 2]) > 0.02
+                grasp_flag = self.agent.is_grasping(self.cubeC) or z_flag
+                # give reward even if not grasping but above threshold to avoid decrease when releasing cube C after stacking
+
+                # in [-0.5,0.5], equal contribution eef-C, AB-to-C, grasp+height bonus
+                reward = (
+                    self._distance_to_reward(distance_eef_C) * 2.0 +
+                    (z_flag.float() + grasp_flag.float()) / 2.0
+                ) / 2.0
+                reward += - 0.7 - 0.5
+
+            elif current_step == 2:
+                # reward based on distance of cube C to cube A and B, with bonus reward for ungrasping
+                distance_AC = torch.linalg.norm(offset_AC)
+                distance_BC = torch.linalg.norm(offset_BC)
+                grasp_flag = self.agent.is_grasping(self.cubeC)
+                
+                # in [0.5,1.5], equal contribution AC-to-C, BC-to-C, ungrasping bonus
+                reward = (
+                    (self._distance_to_reward(distance_AC) + self._distance_to_reward(distance_BC)) +
+                    (1.0 - grasp_flag.float())
+                ) / 2.0
+                reward += 0.0
+                
+            else:
+                reward = SUCCESS_REWARD
+            
+            
+            
         return np.array(reward)
     
 

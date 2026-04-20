@@ -499,7 +499,7 @@ def _make_env(env_id, **kwargs):
     if "StackPyramid-v1" in env_id:
         import stack_pyramid as local_stack_pyramid
 
-        return local_stack_pyramid.StackPyramidEnv(env_reward_type="normalized_dense", randomize_cubes=False, **kwargs)
+        return local_stack_pyramid.StackPyramidEnv(env_reward_type="normalized_dense", **kwargs)
     return gym.make(env_id, **kwargs)
 
 
