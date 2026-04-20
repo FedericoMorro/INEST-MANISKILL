@@ -18,7 +18,7 @@ export REPLAY_BUFFER_CAPACITY="1_000_000"
 export ACTOR_LR="3e-4"
 export CRITIC_LR="1e-4"
 export ALPHA_LR="3e-4"
-export DISCOUNT="0.93"
+export DISCOUNT="0.925"
 export TARGET_ENTROPY="-3.5"
 export STD_ACTION_NOISE="0.0"
 export ANNEAL_TARGET_ENTROPY="False"
@@ -41,7 +41,7 @@ if [[ "$1" == "inest" ]]; then
 
     sbatch --job-name=inest_rl_train \
         --ntasks-per-node=1 \
-        --cpus-per-task=32 \
+        --cpus-per-task=36 \
         --mem=64GB \
         --mail-type=ALL \
         --mail-user=federico.morro@polito.it \

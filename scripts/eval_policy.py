@@ -426,15 +426,31 @@ def main():
     std_reward = float(np.std(rewards))
     mean_length = float(np.mean(lengths))
     std_length = float(np.std(lengths))
+    
+    # Convert subgoal indices to dict of reach rates
+    max_subgoal = eval_env.unwrapped.max_subgoal
+    episode_subgoals_dict = {i: 0 for i in range(max_subgoal + 1)}
+    for subgoal_idxs in subgoal_idxs_all:
+        # interpret first as failure rate, then cumulative reach rates for each subgoal
+        subgoal_reached = len(subgoal_idxs)
+        if subgoal_reached == 0:
+            episode_subgoals_dict[0] += 1
+        else:
+            for idx in range(1, subgoal_reached + 1):
+                episode_subgoals_dict[idx] += 1
+    episode_subgoals_dict = {k: v / args.num_episodes for k, v in episode_subgoals_dict.items()}
+    
+    success_rate = episode_subgoals_dict.get(max_subgoal, 0.0)
+    avg_subgoal_reached = np.mean([len(idxs) for idxs in subgoal_idxs_all])
 
     # Log results
     logging.info("=" * 50)
     logging.info("Evaluation Results")
     logging.info("=" * 50)
     logging.info(f"Mean Reward: {mean_reward:.4f} ± {std_reward:.4f}")
-    logging.info(f"Mean Episode Length: {mean_length:.2f} ± {std_length:.2f}")
-    logging.info(f"Min Reward: {np.min(rewards):.4f}")
-    logging.info(f"Max Reward: {np.max(rewards):.4f}")
+    logging.info(f"Min-Max Reward: {np.min(rewards):.4f} - {np.max(rewards):.4f}")
+    logging.info(f"Success Rate: {success_rate:.4f}")
+    logging.info(f"Average Subgoals Reached: {avg_subgoal_reached:.2f} / {max_subgoal}")
     if traj_dir:
         logging.info(f"Trajectories saved to: {traj_dir}")
     logging.info("=" * 50)
@@ -447,6 +463,9 @@ def main():
         "std_length": std_length,
         "min_reward": float(np.min(rewards)),
         "max_reward": float(np.max(rewards)),
+        "success_rate": success_rate,
+        "average_subgoals_reached": avg_subgoal_reached,
+        "subgoal_reach_rates": episode_subgoals_dict,
         "individual_rewards": rewards,
         "episode_lengths": lengths,
         "frame_counts": frame_counts,

@@ -27,7 +27,8 @@ from mani_skill.utils.structs.pose import Pose
 
 HORIZON = 100
 ENFORCE_FULL_EPISODES = True
-DEFAULT_RANDOMIZE_CUBES = False
+DEFAULT_RANDOMIZE_CUBES = True
+SUCCESS_REWARD = 2.0
 
 
 @register_env("StackPyramid-v1custom", max_episode_steps=HORIZON)
@@ -409,7 +410,7 @@ class StackPyramidEnv(BaseEnv):
             reward -= 0.7
 
         else:
-            reward = 1.1
+            reward = SUCCESS_REWARD
         
         return np.array(reward)
     
