@@ -45,7 +45,7 @@ python inest_irl/maniskill3/replay_trajectory.py
     --save-traj
     --obs-mode rgb
     --output-path ../data/inest-maniskill/negative-trajs
-    --save-unsuccessful
+    --allow-failure
     [--subtask-json]
 """
 
@@ -150,8 +150,6 @@ class Args:
     """Whether to save a json file containing the subtask segmentation of the trajectory based on heuristic rules.
     This is only supported for the StackPyramid environment, WITHOUT action conversion, and using the CPU simulation backend.
     File will be called subgoal_frames.json."""
-    save_unsuccessful: bool = False
-    """Whether to save trajectories and videos even when episodes fail (unsuccessful replays)"""
 
 
 @dataclass
@@ -417,7 +415,7 @@ def replay_cpu_sim(
                     # check if subgoal is reached and save frames for subtask segmentation
                     if subtask_enabled:
                         curr_subgoal = env.base_env.get_current_subgoal()
-                        if len(subgoal_frames) != curr_subgoal:
+                        if curr_subgoal > len(subgoal_frames):
                             subgoal_frames.append(t)
 
                     if args.use_env_states:
@@ -465,13 +463,6 @@ def replay_cpu_sim(
                     env.flush_video(ignore_empty_transition=False)
                 if subtask_enabled:
                     subtask_data[episode_id] = subgoal_frames
-                break
-            elif args.save_unsuccessful:
-                # Save unsuccessful replay without counting as successful
-                if args.save_traj:
-                    env.flush_trajectory()
-                if args.save_video:
-                    env.flush_video(ignore_empty_transition=False)
                 break
             else:
                 if args.verbose:

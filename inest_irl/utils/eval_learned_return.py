@@ -27,6 +27,7 @@ import torch
 from torchkit import CheckpointManager
 from tqdm.auto import tqdm
 
+from inest_irl.maniskill3.stack_pyramid import MAX_SUBGOAL
 from utils import load_config_from_dir
 from xirl import common
 from xirl.models import SelfSupervisedModel
@@ -93,7 +94,7 @@ def _setup(experiment_path, use_cpu, diff_dataset_path=None):
     subgoal_frames = None
     print("No subgoal frames file found - will only compute and plot rewards to final goal")
   
-  return model, train_loader, valid_loader, subgoal_frames, device
+  return model, train_loader, valid_loader, subgoal_frames, global_step, device
 
 
 def compute_goal_embedding(model, train_loader, subgoal_frames, device):
@@ -115,7 +116,7 @@ def compute_goal_embedding(model, train_loader, subgoal_frames, device):
 
         # if empty list, add empty lists inside with the length of the number of subgoals
         if len(subgoal_embs_list) == 0:
-          for _ in range(len(subgoal_idxs)):
+          for _ in range(MAX_SUBGOAL):
             subgoal_embs_list.append([])
 
         # add subgoal embeddings to the corresponding subgoal index list
@@ -337,14 +338,15 @@ def main(args):
 
   # setup model and data
   print(f"Loading model from: {args.experiment_path}")
-  model, train_loader, valid_loader, subgoal_frames, device = _setup(
+  model, train_loader, valid_loader, subgoal_frames, global_step, device = _setup(
     args.experiment_path, 
     args.use_cpu, 
     diff_dataset_path=args.diff_trajs_dataset
   )
 
   # check for cached results in output directory
-  cache_path = os.path.join(out_dir, 'rew_cache.pkl')
+  checkpoint_dir = os.path.join(args.experiment_path, "checkpoints")
+  cache_path = os.path.join(checkpoint_dir, f"cached_embeddings_step_{global_step}.pkl")
   if not os.path.exists(cache_path):
     print("No cached embedddings found - computing from scratch...")
 
@@ -389,9 +391,10 @@ def main(args):
     plot_trajectory_samples(subgoal_rewards, traj_ids, trajs_out_dir, subgoal_reachs, label="Learned Subgoal Reward", count=args.count)
     plot_results(subgoal_rewards, out_dir, subgoal_reachs, label="Learned Subgoal Reward")
 
-    for i, subgoal_dist in enumerate(subgoal_dists):
-      plot_trajectory_samples(subgoal_dist, traj_ids, trajs_out_dir, subgoal_reachs, label=f"Distance to Subgoal {i+1}", count=args.count)
-      plot_results(subgoal_dist, out_dir, subgoal_reachs, label=f"Distance to Subgoal {i+1}")
+    if args.plot_subgoal_dists:
+      for i, subgoal_dist in enumerate(subgoal_dists):
+        plot_trajectory_samples(subgoal_dist, traj_ids, trajs_out_dir, subgoal_reachs, label=f"Distance to Subgoal {i+1}", count=args.count)
+        plot_results(subgoal_dist, out_dir, subgoal_reachs, label=f"Distance to Subgoal {i+1}")
 
     # save .txt with per trajectory subgoal reaching timesteps
     traj_substep = []
@@ -423,7 +426,9 @@ if __name__ == "__main__":
   arg_parser.add_argument("--no_plot_trajs", action='store_true', default=False,
                           help="Whether to save plots for learned rewards")
   arg_parser.add_argument("--no_plot_subgoal_trajs", action='store_true', default=False,
-                          help="Whether to save plots for subgoal rewards and distances")
+                          help="Whether to save plots for subgoal rewards")
+  arg_parser.add_argument("--plot_subgoal_dists", action='store_true', default=False,
+                          help="Whether to save plots for distances to subgoals (in embedding space)")
   arg_parser.add_argument("--diff_trajs_dataset", type=str, default=None,
                           help="Optional path to another trajectory dataset directory to check reward signal sanity")
   args = arg_parser.parse_args()

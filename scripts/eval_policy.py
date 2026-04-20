@@ -326,7 +326,8 @@ def main():
     parser.add_argument("--config_path", type=str, 
                         default="/home/fmorro/INEST-MANISKILL/scripts/configs/sb3_sac.py",
                         help="Path to the configuration file")
-    parser.add_argument("--num_episodes", type=int, default=10,
+    parser.add_argument("--seed", type=int, default=2222, help="Random seed for evaluation")
+    parser.add_argument("--num_episodes", type=int, default=100,
                         help="Number of evaluation episodes")
     parser.add_argument("--save_video", action="store_true", default=True,
                         help="Whether to save video recordings")
@@ -336,6 +337,10 @@ def main():
                         help="Device to use (e.g., 'cpu', 'cuda:0')")
     
     args = parser.parse_args()
+    
+    # Set random seeds for reproducibility
+    torch.manual_seed(args.seed)
+    np.random.seed(args.seed)
     
     # Validate checkpoint path
     if not args.model_path:
@@ -364,7 +369,7 @@ def main():
     logging.info(f"Creating environment: {config.env_name}")
     eval_env = utils.make_env(
         config.env_name,
-        seed=22,
+        seed=args.seed,
         env_reward_type="normalized_dense",
         action_repeat=config.action_repeat,
         frame_stack=config.frame_stack,
@@ -398,6 +403,8 @@ def main():
         video_path = None
         if args.save_video and traj_dir:
             video_path = os.path.join(traj_dir, f"{episode_num}.mp4")
+            
+        eval_env.unwrapped.set_seed(args.seed + episode_num)
         
         episode_reward, episode_length, frame_count, step_rewards, subgoal_idxs, actions = _run_episode(
             model, eval_env, video_path, save_video=args.save_video
@@ -409,7 +416,7 @@ def main():
         
         # Store trajectory data for H5 saving
         episodes_data.append({
-            'seed': 22 + episode_num,
+            'seed': args.seed + episode_num,
             'elapsed_steps': episode_length,
             'actions': actions,
         })

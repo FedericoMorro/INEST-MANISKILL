@@ -28,8 +28,9 @@ from mani_skill.utils.structs.pose import Pose
 HORIZON = 100
 ENFORCE_FULL_EPISODES = True
 DEFAULT_RANDOMIZE_CUBES = True
-SUCCESS_REWARD = 1.5
+SUCCESS_REWARD = 2.0
 N_STEP_DENSE_REWARD = 3
+MAX_SUBGOAL = 4
 
 
 @register_env("StackPyramid-v1custom", max_episode_steps=HORIZON)
@@ -74,10 +75,12 @@ class StackPyramidEnv(BaseEnv):
         
         self.randomize_cubes = randomize_cubes
         kwargs["reward_mode"] = env_reward_type
-        self.max_subgoal = 4
+        self.max_subgoal = MAX_SUBGOAL
 
         self.robot_init_qpos_noise = robot_init_qpos_noise
         super().__init__(*args, robot_uids=robot_uids, **kwargs)
+        
+    
 
     @property
     def _default_sensor_configs(self):
@@ -283,6 +286,9 @@ class StackPyramidEnv(BaseEnv):
     def get_current_subgoal(self):
         return self.curr_subgoal
 
+
+    def set_seed(self, seed):
+        self.seed = seed
 
     def reset(self, **kwargs):
         self.step_count = 0
