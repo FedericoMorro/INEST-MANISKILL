@@ -94,8 +94,10 @@ class StackPyramidEnv(BaseEnv):
 
     @property
     def _default_human_render_camera_configs(self):
+        #pose = sapien_utils.look_at([0.6, 0.7, 0.6], [0.0, 0.0, 0.35])
+        #return CameraConfig("render_camera", pose, 512, 512, 1, 0.01, 100)
         pose = sapien_utils.look_at([0.6, 0.7, 0.6], [0.0, 0.0, 0.35])
-        return CameraConfig("render_camera", pose, 512, 512, 1, 0.01, 100)
+        return CameraConfig("render_camera", pose, 128, 128, 1, 0.01, 100)
 
     def _load_scene(self, options: dict):
         self.cube_half_size = common.to_tensor([0.02] * 3)
@@ -299,7 +301,9 @@ class StackPyramidEnv(BaseEnv):
         #! equal seed at reset => same env reset
         # seed is used only one (common practice) to ensure reproducibility of environment initialization
         if self.seed is not None:
-            del kwargs["seed"]   # remove seed from kwargs to avoid multiple assignments error
+            # remove seed from kwargs to avoid multiple assignments error in BaseEnv reset
+            if "seed" in kwargs:
+                del kwargs["seed"]
             obs, info = super().reset(seed=self.seed, **kwargs)
             self._reset_seed()
         else:

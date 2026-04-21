@@ -7,6 +7,7 @@ import logging
 import matplotlib.pyplot as plt
 import numpy as np
 import os
+from PIL import Image
 import torch
 from tqdm import tqdm
 from types import MethodType, SimpleNamespace
@@ -147,11 +148,16 @@ def _save_video(video_path, frames, fps=10):
         logging.warning(f"No frames to save for video")
         return
     
+    def _upscale_frame(frame, target_size=(512, 512)):
+        img = Image.fromarray(frame)
+        img = img.resize(target_size, resample=Image.BILINEAR)
+        return np.array(img)
+    
     try:
         #logging.info(f"Saving video: {video_path}")
         with imageio.get_writer(video_path, fps=fps) as writer:
             for frame in frames:
-                writer.append_data(frame)
+                writer.append_data(_upscale_frame(frame))
         #logging.info(f"Saved video: {video_path} ({len(frames)} frames)")
     except Exception as e:
         logging.error(f"Error saving video {video_path}: {e}")
