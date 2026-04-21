@@ -37,6 +37,8 @@ def get_config():
 
   config.action_repeat = 1
   config.frame_stack = 3
+  config.env_randomization = True
+  config.reward_scaling = 1.0
 
   config.reward_wrapper = ml_collections.ConfigDict()
   # Can be one of ['distance_to_goal', 'goal_classifier', 'inest', 'inest_knn', 'state_intrinsic', 'reds'].

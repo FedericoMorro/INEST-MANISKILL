@@ -1,17 +1,15 @@
 import argparse
+import h5py
+import imageio
+import inspect
 import json
 import logging
 import matplotlib.pyplot as plt
-import mani_skill.envs
 import numpy as np
 import os
-from pathlib import Path
 import torch
-import gymnasium as gym
+from tqdm import tqdm
 from types import MethodType, SimpleNamespace
-import inspect
-import imageio
-import h5py
 import yaml
 
 from stable_baselines3 import SAC
@@ -150,11 +148,11 @@ def _save_video(video_path, frames, fps=10):
         return
     
     try:
-        logging.info(f"Saving video: {video_path}")
+        #logging.info(f"Saving video: {video_path}")
         with imageio.get_writer(video_path, fps=fps) as writer:
             for frame in frames:
                 writer.append_data(frame)
-        logging.info(f"Saved video: {video_path} ({len(frames)} frames)")
+        #logging.info(f"Saved video: {video_path} ({len(frames)} frames)")
     except Exception as e:
         logging.error(f"Error saving video {video_path}: {e}")
         import traceback
@@ -181,12 +179,12 @@ def _save_reward_plot(plot_path, step_rewards, subgoal_idxs=None):
         plt.tight_layout()
         plt.savefig(plot_path, dpi=300, bbox_inches='tight')
         plt.close()
-        logging.info(f"Saved reward plot: {plot_path}")
+        #logging.info(f"Saved reward plot: {plot_path}")
     except Exception as e:
         logging.error(f"Error saving reward plot {plot_path}: {e}")
 
-def _save_trajectory_h5(h5_path, json_path, env, episodes_data):
-    """Save evaluation trajectories to H5 and metadata to JSON for replay compatibility."""
+def _save_trajectory_h5(h5_path, json_path, env, episodes_data, save_rgb=False):
+    """Save evaluation trajectories to H5 and metadata to JSON with optional RGB observations, rewards, and subgoals."""
     try:
         # Save metadata JSON
         json_data = {
@@ -206,9 +204,25 @@ def _save_trajectory_h5(h5_path, json_path, env, episodes_data):
         with h5py.File(h5_path, 'w') as f:
             for episode_id, data in enumerate(episodes_data):
                 actions = data.get('actions', [])
+                observations = data.get('observations', []) if save_rgb else []
+                rewards = data.get('rewards', [])
+                subgoal_idxs = data.get('subgoal_idxs', [])
+                
                 if len(actions) > 0:
                     actions_array = np.array(actions, dtype=np.float32)
                     f.create_dataset(f'traj_{episode_id}/actions', data=actions_array, compression='gzip')
+                
+                if save_rgb and len(observations) > 0:
+                    obs_array = np.array(observations, dtype=np.uint8)
+                    f.create_dataset(f'traj_{episode_id}/obs/sensor_data/hand_camera/rgb', data=obs_array, compression='gzip')
+                
+                if len(rewards) > 0:
+                    rewards_array = np.array(rewards, dtype=np.float32)
+                    f.create_dataset(f'traj_{episode_id}/rewards', data=rewards_array, compression='gzip')
+                
+                if len(subgoal_idxs) > 0:
+                    subgoal_array = np.array(subgoal_idxs, dtype=np.int32)
+                    f.create_dataset(f'traj_{episode_id}/subgoal_idxs', data=subgoal_array, compression='gzip')
                 
                 json_data["episodes"].append({
                     "episode_id": episode_id,
@@ -227,8 +241,8 @@ def _save_trajectory_h5(h5_path, json_path, env, episodes_data):
         import traceback
         traceback.print_exc()
 
-def _run_episode(model, env, video_path=None, save_video=True):
-    """Run single evaluation episode manually, optionally recording video and collecting actions."""
+def _run_episode(model, env, video_path=None, save_video=True, save_rgb=False):
+    """Run single evaluation episode, optionally collecting RGB observations, actions, rewards, and subgoal indices."""
     reset_result = env.reset()
     if isinstance(reset_result, tuple):
         obs, info = reset_result
@@ -242,8 +256,10 @@ def _run_episode(model, env, video_path=None, save_video=True):
     frames = []
     subgoal_idxs = []
     actions = []
+    observations = []
+    rewards = []
     
-    while step_count < HORIZON:
+    while not done:
         action, _ = model.predict(obs, deterministic=DETERMINISTIC)
         actions.append(action)
         step_result = env.step(action)
@@ -257,6 +273,7 @@ def _run_episode(model, env, video_path=None, save_video=True):
         reward = float(reward)
         episode_reward += reward
         step_rewards.append(reward)
+        rewards.append(reward)
         step_count += 1
         done = terminated or truncated
 
@@ -264,12 +281,15 @@ def _run_episode(model, env, video_path=None, save_video=True):
         if curr_subgoal is not None and curr_subgoal > len(subgoal_idxs):
             subgoal_idxs.append(step_count)
         
-        # Render frame if video saving enabled
-        if save_video:
+        # Render frame for both video and optional observation storage
+        if save_video or save_rgb:
             try:
                 frame = safe_render(env, mode="rgb_array")
                 if frame is not None:
-                    frames.append(frame)
+                    if save_video:
+                        frames.append(frame)
+                    if save_rgb:
+                        observations.append(frame)
             except Exception as e:
                 logging.debug(f"Error getting frame: {e}")
     
@@ -277,7 +297,7 @@ def _run_episode(model, env, video_path=None, save_video=True):
     if video_path and frames:
         _save_video(video_path, frames)
     
-    return episode_reward, step_count, len(frames), step_rewards, subgoal_idxs, actions
+    return episode_reward, step_count, len(frames), step_rewards, subgoal_idxs, actions, observations, rewards
 
 
 def _create_plots(results, output_dir):
@@ -327,10 +347,14 @@ def main():
     parser.add_argument("--seed", type=int, default=2222, help="Random seed for evaluation")
     parser.add_argument("--num_episodes", type=int, default=100,
                         help="Number of evaluation episodes")
-    parser.add_argument("--save_video", action="store_true", default=True,
-                        help="Whether to save video recordings")
+    parser.add_argument("--save_viz", action="store_true", default=True,
+                        help="Whether to save visualization (videos and plots)")
     parser.add_argument("--no_save_video", action="store_false", dest="save_video",
                         help="Disable video recording")
+    parser.add_argument("--save_rgb", action="store_true", default=False,
+                        help="Save RGB observations to H5 file for dataset creation")
+    parser.add_argument("--no_progress_bar", action="store_true", default=False,
+                        help="Disable progress bar")
     parser.add_argument("--device", type=str, default="cpu",
                         help="Device to use (e.g., 'cpu', 'cuda:0')")
     
@@ -399,7 +423,7 @@ def main():
     model_basename = os.path.basename(checkpoint_dir).split('.')[0]
     parent_dir = os.path.dirname(os.path.dirname(checkpoint_dir))
     results_dir = os.path.join(parent_dir, "eval_results", model_basename)
-    traj_dir = os.path.join(results_dir, "trajs") if args.save_video else None
+    traj_dir = os.path.join(results_dir, "trajs") if args.save_viz else None
     if traj_dir:
         os.makedirs(traj_dir, exist_ok=True)
     os.makedirs(results_dir, exist_ok=True)
@@ -411,16 +435,16 @@ def main():
     frame_counts = []
     subgoal_idxs_all = []
     episodes_data = []
-
-    for episode_num in range(args.num_episodes):
+        
+    for episode_num in tqdm(range(args.num_episodes), desc="Evaluating", unit="episode", disable=args.no_progress_bar):
         video_path = None
-        if args.save_video and traj_dir:
+        if args.save_viz and traj_dir:
             video_path = os.path.join(traj_dir, f"{episode_num}.mp4")
             
         eval_env.unwrapped.set_seed(args.seed + episode_num)
         
-        episode_reward, episode_length, frame_count, step_rewards, subgoal_idxs, actions = _run_episode(
-            model, eval_env, video_path, save_video=args.save_video
+        episode_reward, episode_length, frame_count, step_rewards, subgoal_idxs, actions, observations, ep_rewards = _run_episode(
+            model, eval_env, video_path, save_video=args.save_viz, save_rgb=args.save_rgb
         )
         rewards.append(episode_reward)
         lengths.append(episode_length)
@@ -432,10 +456,13 @@ def main():
             'seed': args.seed + episode_num,
             'elapsed_steps': episode_length,
             'actions': actions,
+            'observations': observations,
+            'rewards': ep_rewards,
+            'subgoal_idxs': subgoal_idxs,
         })
         
         # Save reward curve plot
-        if args.save_video and traj_dir:
+        if args.save_viz and traj_dir:
             plot_path = os.path.join(traj_dir, f"{episode_num}.png")
             _save_reward_plot(plot_path, step_rewards, subgoal_idxs)
         
@@ -500,7 +527,7 @@ def main():
     # Save trajectories to H5 for replay compatibility
     h5_path = os.path.join(results_dir, "trajectories.h5")
     json_traj_path = os.path.join(results_dir, "trajectories.json")
-    _save_trajectory_h5(h5_path, json_traj_path, eval_env, episodes_data)
+    _save_trajectory_h5(h5_path, json_traj_path, eval_env, episodes_data, save_rgb=args.save_rgb)
 
     # Create plots
     _create_plots(results, results_dir)

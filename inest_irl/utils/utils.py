@@ -215,6 +215,8 @@ def make_env(
   obs_mode = "state",
   frame_stack = 1,
   action_repeat = 1,
+  env_randomization = True,
+  reward_scaling = 1.0,
   rank = 0,
   train_flag = False,
   exp_dir = None,
@@ -264,6 +266,8 @@ def make_env(
     control_mode="pd_ee_delta_pose", # pd_ee_delta_pos[e], with e includes also gripper quaternion orientation control
     render_mode="rgb_array",
     env_reward_type="normalized_dense",
+    env_randomization=env_randomization,
+    enforce_full_episodes=True,
   )
 
   if add_episode_monitor:
@@ -276,6 +280,9 @@ def make_env(
     env = wrappers.VideoRecorder(env, save_dir=exp_dir)
   if frame_stack > 1:
     env = wrappers.FrameStack(env, frame_stack)
+    
+  if reward_scaling != 1.0:
+    env = wrappers.RewardScaler(env, reward_scaling)
 
   if not wrap:
     return env

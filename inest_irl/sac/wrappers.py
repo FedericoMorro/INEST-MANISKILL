@@ -220,11 +220,10 @@ class RewardScale(gym.Wrapper):
     result = self.env.step(action)
     if len(result) == 5:
         obs, reward, done, truncated, info = result
-        done = done or truncated
+        return obs, reward * self._scale, done, truncated, info
     else:
         obs, reward, done, info = result
-    reward *= self._scale
-    return obs, reward, done, info
+        return obs, reward * self._scale, done, info
 
 
 class EpisodeMonitor(gym.ActionWrapper):

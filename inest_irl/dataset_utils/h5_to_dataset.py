@@ -99,10 +99,14 @@ def _save_data_as_json(group, keys, key_type, path, traj_idx):
 def handle_traj(group, path, idx, obs_key, action_keys, robot_state_keys, objects_state_keys):
   # save a frame-idx.png for each frame in the trajectory
   if obs_key is not None:
-    obs = _access_nested_group(group, obs_key)
-    for i in range(obs.shape[0]):
-      frame_path = os.path.join(path, f'{i}.png')
-      Image.fromarray(obs[i]).save(frame_path)
+    try:
+      obs = _access_nested_group(group, obs_key)
+      for i in range(obs.shape[0]):
+        frame_path = os.path.join(path, f'{i}.png')
+        Image.fromarray(obs[i]).save(frame_path)
+    except KeyError:
+      # Handle case where obs_key doesn't exist in this trajectory
+      pass
     
   # save a traj-idx_element.json for each trajectory element
   _save_data_as_json(group, action_keys, None, path, idx)

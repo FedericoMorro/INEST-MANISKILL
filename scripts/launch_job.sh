@@ -15,6 +15,8 @@ fi
 export EXPERIMENT_NAME="$2"
 export RND_SEED="22"
 export REWARD_WRAPPER_TYPE="goal_dist"
+export REWARD_SCALING="1.0"
+export ENV_RANDOMIZATION="False"
 export REPLAY_BUFFER_CAPACITY="1_000_000"
 export ACTOR_LR="3e-4"
 export CRITIC_LR="1e-4"

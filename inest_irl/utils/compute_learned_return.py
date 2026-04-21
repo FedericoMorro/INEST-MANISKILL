@@ -253,7 +253,7 @@ def plot_trajectory_samples(rewards, traj_ids, output_dir, subgoal_reachs, label
     plt.close()
 
 
-def plot_results(rewards, output_dir, subgoal_reachs, label="Learned Reward"):
+def plot_mean_results(rewards, output_dir, subgoal_reachs, label="Learned Reward"):
   """Plot mean reward per timestep and return padded trajectories info."""
   os.makedirs(output_dir, exist_ok=True)
   
@@ -376,25 +376,31 @@ def main(args):
     print(f"Computed {len(rewards)} reward signals")
 
 
+  # plot trajectory lengths once using base rewards, to understand distribution of trajectory lengths and mean-std plots better
+  _, lengths = pad_trajectories(rewards)
+  plot_trajectory_lengths(lengths, out_dir)
+  
+  # plot mean results
+  plot_mean_results(rewards, out_dir, None, label="Learned Reward")
+  
   if not args.no_plot_trajs:
-    # plot trajectory lengths once using base rewards, to understand distribution of trajectory lengths and mean-std plots better
-    _, lengths = pad_trajectories(rewards)
-    plot_trajectory_lengths(lengths, out_dir)
-
     # save one trajectory plot per eval sample (or up to count)
     plot_trajectory_samples(rewards, traj_ids, trajs_out_dir, None, label="Learned Reward", count=args.count)
   
-    # plot results
-    plot_results(rewards, out_dir, None, label="Learned Reward")
 
-  if not args.no_plot_subgoal_trajs and subgoal_rewards is not None:
-    plot_trajectory_samples(subgoal_rewards, traj_ids, trajs_out_dir, subgoal_reachs, label="Learned Subgoal Reward", count=args.count)
-    plot_results(subgoal_rewards, out_dir, subgoal_reachs, label="Learned Subgoal Reward")
+  # plot subgoal mean rewards and distances
+  if subgoal_rewards is not None:
+    plot_mean_results(subgoal_rewards, out_dir, subgoal_reachs, label="Learned Subgoal Reward")
+    for i, subgoal_dist in enumerate(subgoal_dists):
+      plot_mean_results(subgoal_dist, out_dir, subgoal_reachs, label=f"Distance to Subgoal {i+1}")
+    
+    # plot for traj samples
+    if not args.no_plot_subgoal_trajs: 
+      plot_trajectory_samples(subgoal_rewards, traj_ids, trajs_out_dir, subgoal_reachs, label="Learned Subgoal Reward", count=args.count)
 
     if args.plot_subgoal_dists:
       for i, subgoal_dist in enumerate(subgoal_dists):
         plot_trajectory_samples(subgoal_dist, traj_ids, trajs_out_dir, subgoal_reachs, label=f"Distance to Subgoal {i+1}", count=args.count)
-        plot_results(subgoal_dist, out_dir, subgoal_reachs, label=f"Distance to Subgoal {i+1}")
 
     # save .txt with per trajectory subgoal reaching timesteps
     traj_substep = []

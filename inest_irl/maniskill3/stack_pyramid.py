@@ -26,11 +26,10 @@ from mani_skill.utils.structs.pose import Pose
 
 
 HORIZON = 100
-ENFORCE_FULL_EPISODES = True
 DEFAULT_RANDOMIZE_CUBES = True
 MAX_SUBGOAL = 4
 
-N_STEP_DENSE_REWARD = 3
+N_STEP_DENSE_REWARD = 4
 SUCCESS_REWARD = 2.0
 
 
@@ -65,7 +64,8 @@ class StackPyramidEnv(BaseEnv):
         env_reward_type="sparse",
         robot_uids="panda_wristcam",
         robot_init_qpos_noise=0.02,
-        randomize_cubes=DEFAULT_RANDOMIZE_CUBES,
+        env_randomization=DEFAULT_RANDOMIZE_CUBES,
+        enforce_full_episodes=True,
         **kwargs
     ):
         print("Initializing custom StackPyramid environment")
@@ -74,7 +74,9 @@ class StackPyramidEnv(BaseEnv):
             print(f"No seed provided for environment initialization. Results may not be reproducible. Seed selected randomly: {seed}")
         self.seed = seed
         
-        self.randomize_cubes = randomize_cubes
+        self.randomize_cubes = env_randomization
+        self.enforce_full_episodes = enforce_full_episodes
+        
         kwargs["reward_mode"] = env_reward_type
         self.max_subgoal = MAX_SUBGOAL
 
@@ -321,11 +323,8 @@ class StackPyramidEnv(BaseEnv):
         self._update_subgoal_success()
         info["subgoal"] = self.curr_subgoal
 
-        if ENFORCE_FULL_EPISODES:
-            if self.step_count < HORIZON:
-                terminated = torch.tensor([False], device=self.device)
-            else:
-                terminated = torch.tensor([True], device=self.device)
+        if self.enforce_full_episodes and self.step_count < HORIZON:
+            terminated = torch.tensor([False], device=self.device)
             
         return obs, reward, terminated, truncated, info
 
@@ -477,7 +476,6 @@ class StackPyramidEnv(BaseEnv):
                 
             else:
                 reward = 2.5
-            
             
             
         return np.array(reward)
