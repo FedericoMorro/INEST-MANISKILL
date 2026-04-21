@@ -7,6 +7,10 @@
 
 ## Edited Files
 - `sac/sac.py`: 1
+    - `__init__()`, `train()`
 - `common/evaluation.py`: 2
+    - `evaluate_policy()`
 - `common/off_policy_algorithm.py`: 3
+    - `dump_logs()`
 - `common/base_class.py`: 3
+    - `_update_info_buffer()`

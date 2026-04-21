@@ -435,6 +435,25 @@ class OffPolicyAlgorithm(BaseAlgorithm):
 
         if len(self.ep_success_buffer) > 0:
             self.logger.record("rollout/success_rate", safe_mean(self.ep_success_buffer))
+            
+        # add subgoal logs to item to be taken and logged to wandb
+        if len(self.ep_info_buffer) > 0 and "subgoal" in self.ep_info_buffer[0]:
+            episodes_subgoals = [ep_info["subgoal"] for ep_info in self.ep_info_buffer]
+            max_subgoal = self.env.get_attr("max_subgoal", 0)[0]
+            self.log_subgoal_buffer = {i: 0 for i in range(max_subgoal + 1)}
+            for subgoal in episodes_subgoals:
+                # non-cumulative for 0
+                if subgoal == 0:
+                    self.log_subgoal_buffer[0] += 1
+                # cumulative for others
+                else:
+                    for i in range(1, subgoal + 1):
+                        self.log_subgoal_buffer[i] += 1
+
+            # normalize by number of episodes
+            for subgoal in self.log_subgoal_buffer:
+                self.log_subgoal_buffer[subgoal] /= len(episodes_subgoals)
+                    
 
         # add time logs to item to be taken and logged to wandb
         self.log_time_buffer = {

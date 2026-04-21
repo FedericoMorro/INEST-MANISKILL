@@ -82,6 +82,16 @@ class WandbCallback(BaseCallback):
                         metrics['rollout/ep_success_mean'] = float(np.mean(successes))
                     else:
                         metrics['rollout/ep_success_mean'] = float(0)
+                        
+                # Extract subgoal stats if available
+                if hasattr(self.model, 'log_subgoal_buffer') and len(self.model.log_subgoal_buffer) > 0:
+                    for subgoal, count in self.model.log_subgoal_buffer.items():
+                        if subgoal == 0:
+                            metrics[f"rollout/failed_%"] = float(count)
+                        else:
+                            metrics[f"rollout/subgoal_{subgoal}_%"] = float(count)
+                    self.model.log_subgoal_buffer = {}
+                    
             except Exception:
                 pass
 
