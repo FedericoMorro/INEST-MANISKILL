@@ -8,10 +8,11 @@ import os
 from pathlib import Path
 import torch
 import gymnasium as gym
-from types import MethodType
+from types import MethodType, SimpleNamespace
 import inspect
 import imageio
 import h5py
+import yaml
 
 from stable_baselines3 import SAC
 
@@ -323,9 +324,6 @@ def _create_plots(results, output_dir):
 def main():
     parser = argparse.ArgumentParser(description="Evaluate trained RL policy")
     parser.add_argument("model_path", type=str, help="Path to the trained model checkpoint")
-    parser.add_argument("--config_path", type=str, 
-                        default="/home/fmorro/INEST-MANISKILL/scripts/configs/sb3_sac.py",
-                        help="Path to the configuration file")
     parser.add_argument("--seed", type=int, default=2222, help="Random seed for evaluation")
     parser.add_argument("--num_episodes", type=int, default=100,
                         help="Number of evaluation episodes")
@@ -358,19 +356,34 @@ def main():
         device = torch.device("cpu")
     logging.info(f"Using device: {device}")
 
-    # Load configuration
-    import importlib.util
-    spec = importlib.util.spec_from_file_location("config", args.config_path)
-    config_module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(config_module)
-    config = config_module.get_config() if hasattr(config_module, 'get_config') else config_module.config
+    # Load configuration from YAML in experiment root folder (e.g., root/checkpoints/model.zip -> root/config.yaml)
+    config_root = os.path.dirname(os.path.dirname(checkpoint_dir))
+    
+    config_path = os.path.join(config_root, "config.yaml")
+    if not os.path.exists(config_path):
+        raise FileNotFoundError(f"Config YAML not found at {config_path}")
+    
+    logging.info(f"Loading config from {config_path}")
+    with open(config_path, 'r') as f:
+        config_dict = yaml.safe_load(f)
+        
+    def _dict_to_namespace(data):
+        """Recursively convert nested dicts to SimpleNamespace objects."""
+        if isinstance(data, dict):
+            return SimpleNamespace(**{k: _dict_to_namespace(v) for k, v in data.items()})
+        elif isinstance(data, list):
+            return [_dict_to_namespace(item) for item in data]
+        return data
+    
+    # Convert dict to namespace with nested support
+    config = _dict_to_namespace(config_dict)
 
     # Create evaluation environment
     logging.info(f"Creating environment: {config.env_name}")
     eval_env = utils.make_env(
         config.env_name,
         seed=args.seed,
-        env_reward_type="normalized_dense",
+        reward_type=config.reward_wrapper.type,
         action_repeat=config.action_repeat,
         frame_stack=config.frame_stack,
     )

@@ -228,7 +228,7 @@ def _make_env_wrapper(config, seed, rank, train_flag, device, exp_dir):
     return utils.make_env(
         env_name=config.env_name,
         seed=seed,
-        env_reward_type=config.reward_wrapper.type,
+        reward_type=config.reward_wrapper.type,
         obs_mode="state" if config.reward_wrapper.type != "sparse" else "state_dict",
         frame_stack=config.frame_stack,
         action_repeat=config.action_repeat,

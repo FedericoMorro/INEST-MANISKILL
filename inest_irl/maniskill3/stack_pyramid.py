@@ -28,9 +28,10 @@ from mani_skill.utils.structs.pose import Pose
 HORIZON = 100
 ENFORCE_FULL_EPISODES = True
 DEFAULT_RANDOMIZE_CUBES = True
-SUCCESS_REWARD = 2.0
-N_STEP_DENSE_REWARD = 3
 MAX_SUBGOAL = 4
+
+N_STEP_DENSE_REWARD = 3
+SUCCESS_REWARD = 2.0
 
 
 @register_env("StackPyramid-v1custom", max_episode_steps=HORIZON)
@@ -472,10 +473,10 @@ class StackPyramidEnv(BaseEnv):
                     (self._distance_to_reward(distance_AC) + self._distance_to_reward(distance_BC)) +
                     (1.0 - grasp_flag.float())
                 ) / 2.0
-                reward += 0.0
+                reward += 0.5
                 
             else:
-                reward = SUCCESS_REWARD
+                reward = 2.5
             
             
             
