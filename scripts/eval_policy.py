@@ -15,6 +15,7 @@ import yaml
 
 from stable_baselines3 import SAC
 
+from inest_irl.maniskill3.stack_pyramid import MAX_SUBGOAL
 from inest_irl.utils import utils
 
 # Configure logging
@@ -209,26 +210,24 @@ def _save_trajectory_h5(h5_path, json_path, env, episodes_data, save_rgb=False):
         # Save trajectories to H5
         with h5py.File(h5_path, 'w') as f:
             for episode_id, data in enumerate(episodes_data):
-                actions = data.get('actions', [])
-                observations = data.get('observations', []) if save_rgb else []
-                rewards = data.get('rewards', [])
+                actions = data['actions']
+                observations = data['observations']
+                rewards = data['rewards']
                 subgoal_idxs = data.get('subgoal_idxs', [])
                 
-                if len(actions) > 0:
-                    actions_array = np.array(actions, dtype=np.float32)
-                    f.create_dataset(f'traj_{episode_id}/actions', data=actions_array, compression='gzip')
+                actions_array = np.array(actions, dtype=np.float32)
+                f.create_dataset(f'traj_{episode_id}/actions', data=actions_array, compression='gzip')
                 
-                if save_rgb and len(observations) > 0:
+                if save_rgb:
                     obs_array = np.array(observations, dtype=np.uint8)
-                    f.create_dataset(f'traj_{episode_id}/obs/sensor_data/hand_camera/rgb', data=obs_array, compression='gzip')
+                    f.create_dataset(f'traj_{episode_id}/obs/sensor_data/base_camera/rgb', data=obs_array, compression='gzip')
                 
-                if len(rewards) > 0:
-                    rewards_array = np.array(rewards, dtype=np.float32)
-                    f.create_dataset(f'traj_{episode_id}/rewards', data=rewards_array, compression='gzip')
+                rewards_array = np.array(rewards, dtype=np.float32)
+                f.create_dataset(f'traj_{episode_id}/rewards', data=rewards_array, compression='gzip')
                 
-                if len(subgoal_idxs) > 0:
-                    subgoal_array = np.array(subgoal_idxs, dtype=np.int32)
-                    f.create_dataset(f'traj_{episode_id}/subgoal_idxs', data=subgoal_array, compression='gzip')
+                subgoal_array = np.array(subgoal_idxs, dtype=np.int32)
+                subgoal_array = np.pad(subgoal_array, (0, MAX_SUBGOAL - len(subgoal_array)), mode='constant', constant_values=-1)
+                f.create_dataset(f'traj_{episode_id}/subgoal_idxs', data=subgoal_array, compression='gzip')
                 
                 json_data["episodes"].append({
                     "episode_id": episode_id,
@@ -362,7 +361,7 @@ def main():
     parser.add_argument("--no_progress_bar", action="store_true", default=False,
                         help="Disable progress bar")
     parser.add_argument("--device", type=str, default="cpu",
-                        help="Device to use (e.g., 'cpu', 'cuda:0')")
+                        help="Device to use (e.g., 'cpu', 'cuda:0'), NOTE: GPU does not support rendering, so videos saving is compromised when using GPU")
     
     args = parser.parse_args()
     

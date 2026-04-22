@@ -7,7 +7,7 @@ fi
 
 # parse arguments
 model_path="$1"
-save_video=false
+overwrite=false
 eval_learned_return_model=""
 
 # parse optional flags
@@ -75,14 +75,13 @@ print_with_border "EVALUATION"
 
 eval_path="${exp_path}/eval_results/${model_step_no_ext}"
 
-if [[ -d "$eval_path" && "$overwrite" = false ]]; then
+if [[ -d "$eval_path" && "$overwrite" == false ]]; then
     echo "Evaluation results for model: $exp_name - $exp_seed - $model_step_no_ext, already exist at: $eval_path"
 else
     echo "Evaluation results for model: $exp_name - $exp_seed - $model_step_no_ext, not found. Running policy evaluation with default settings..."
     python scripts/eval_policy.py \
         "$model_path" \
-        --save_rgb \
-        --device cuda:0
+        --save_rgb
 fi
 
 
@@ -90,7 +89,7 @@ fi
 # Create dataset directly from evaluation trajectories (already contain RGB observations)
 print_with_border "DATASET CREATION"
 
-save_folder_name="${exp_name}#${exp_seed}#${model_step_no_ext}"
+save_folder_name="${exp_name}*${exp_seed}*${model_step_no_ext}"
 input_traj_h5="${exp_path}/eval_results/${model_step_no_ext}/trajectories.h5"
 output_path="../data/inest-maniskill/experiment_data-trajs/${save_folder_name}"
 output_dataset_dir="${output_path}/dataset"

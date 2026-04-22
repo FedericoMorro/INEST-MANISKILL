@@ -139,13 +139,14 @@ def compute_goal_embedding(model, train_loader, subgoal_frames, device):
   return goal_emb, subgoal_embs, dist_scale
 
 
-def compute_reward_signals(model, valid_loader, goal_emb, subgoal_embs, dist_scale, device):
+def compute_reward_signals(model, valid_loader, goal_emb, subgoal_embs, dist_scale, device, subgoal_frames=None):
   """Compute the negative distance to goal as reward signal for each trajectory"""
   rewards = []
   traj_ids = []
   subgoal_rewards = [] if subgoal_embs is not None else None
   subgoal_reachs = [ [] for _ in range(len(subgoal_embs)) ] if subgoal_embs is not None else None
   subgoal_dists = [ [] for _ in range(len(subgoal_embs)) ] if subgoal_embs is not None else None
+  subgoal_reachs_gt = None
   
   for class_name, class_loader in valid_loader.items():
     for batch in tqdm(iter(class_loader), leave=False, desc=f"Computing rewards for {class_name}"):
@@ -162,6 +163,18 @@ def compute_reward_signals(model, valid_loader, goal_emb, subgoal_embs, dist_sca
 
       # compute subgoal rewards if subgoal embeddings are provided
       if subgoal_embs is not None:
+        # Get ground truth subgoal indices from data if available
+        subogal_reachs_gt_path = Path(f"{batch['video_name'][0]}/{traj_id}_subgoal_idxs.json")
+        if subogal_reachs_gt_path.exists():
+          with open(subogal_reachs_gt_path, 'r') as f:
+            gt_subgoal_idxs = json.load(f)
+            
+          if subgoal_reachs_gt is None:
+            subgoal_reachs_gt = [ [] for _ in range(len(subgoal_embs)) ]
+          for i, idx in enumerate(gt_subgoal_idxs):
+            if i < len(subgoal_reachs_gt):
+              subgoal_reachs_gt[i].append(idx)
+            
         for i, subgoal_emb in enumerate(subgoal_embs):
           subgoal_dists[i].append( 
             np.linalg.norm(subgoal_emb - traj_emb, axis=1)  # shape: (seq_len,)
@@ -190,7 +203,7 @@ def compute_reward_signals(model, valid_loader, goal_emb, subgoal_embs, dist_sca
         for i, reach_step in enumerate(curr_subgoal_identifs):
           subgoal_reachs[i].append(reach_step)
 
-  return rewards, traj_ids, subgoal_rewards, subgoal_dists, subgoal_reachs
+  return rewards, traj_ids, subgoal_rewards, subgoal_dists, subgoal_reachs, subgoal_reachs_gt
 
 
 def pad_trajectories(rewards):
@@ -205,6 +218,31 @@ def pad_trajectories(rewards):
   return padded_rewards, lengths
 
 
+def filter_by_detection(rewards, detected_flags=None):
+  """Filter rewards to only include trajectories where subgoal was detected.
+  
+  Args:
+    rewards: List of reward/distance arrays, one per trajectory
+    detected_flags: List of booleans indicating if subgoal was detected for each trajectory
+    
+  Returns:
+    Filtered rewards list. If filtering results in empty list, returns all rewards.
+  """
+  if detected_flags is None or len(detected_flags) == 0:
+    return rewards
+  
+  filtered_rewards = []
+  for i, reward in enumerate(rewards):
+    if i < len(detected_flags) and detected_flags[i]:
+      filtered_rewards.append(reward)
+  
+  # If filtering results in no trajectories, return all (don't filter)
+  if len(filtered_rewards) == 0:
+    return rewards
+  
+  return filtered_rewards
+
+
 def _sanitize_plot_type(label):
   normalized = label.lower().replace('learned', ' ')
   normalized = normalized.replace('distance', 'dist')
@@ -217,7 +255,7 @@ def _sanitize_plot_type(label):
   return normalized.strip('_')
 
 
-def plot_trajectory_samples(rewards, traj_ids, output_dir, subgoal_reachs, label="Learned Reward", count=None):
+def plot_trajectory_samples(rewards, traj_ids, output_dir, subgoal_reachs, label="Learned Reward", count=None, detected_flags=None, source_label=""):
   """Save one plot per trajectory in the eval set (optionally capped by count)."""
   plot_type = _sanitize_plot_type(label)
 
@@ -243,7 +281,14 @@ def plot_trajectory_samples(rewards, traj_ids, output_dir, subgoal_reachs, label
     
     ax.set_xlabel('Timestep', fontsize=FS_LABEL)
     ax.set_ylabel(label, fontsize=FS_LABEL)
-    ax.set_title(f'Trajectory {traj_id} (Length: {len(sample_reward)})', fontsize=FS_TRAJ_TITLE, fontweight='bold')
+    
+    # Add note if subgoal was not detected
+    title_suffix = ""
+    if detected_flags is not None and idx < len(detected_flags) and not detected_flags[idx]:
+      title_suffix = " [Subgoal Not Detected]"
+    
+    ax.set_title(f'Trajectory {traj_id} (Length: {len(sample_reward)}) {source_label}{title_suffix}', 
+                 fontsize=FS_TRAJ_TITLE, fontweight='bold')
     ax.grid(True)
     ax.legend(fontsize=FS_LEGEND)
 
@@ -253,12 +298,31 @@ def plot_trajectory_samples(rewards, traj_ids, output_dir, subgoal_reachs, label
     plt.close()
 
 
-def plot_mean_results(rewards, output_dir, subgoal_reachs, label="Learned Reward"):
-  """Plot mean reward per timestep and return padded trajectories info."""
+def plot_mean_results(rewards, output_dir, subgoal_reachs, label="Learned Reward", detected_flags=None, source_label=""):
+  """Plot mean reward per timestep and return padded trajectories info.
+  
+  Args:
+    rewards: List of reward/distance arrays
+    output_dir: Directory to save plots
+    subgoal_reachs: List of subgoal reaching timesteps per trajectory (or None)
+    label: Label for the plot
+    detected_flags: Optional list of booleans indicating which trajectories had the subgoal detected
+    source_label: Optional label indicating data source (e.g. "(GT)" or "(detected)")
+  """
   os.makedirs(output_dir, exist_ok=True)
   
+  # Filter rewards by detection status if provided
+  filtered_rewards = filter_by_detection(rewards, detected_flags)
+  if detected_flags is not None:
+    detected_count = sum(detected_flags) if isinstance(detected_flags, list) else np.sum(detected_flags)
+    if len(filtered_rewards) == len(rewards):
+      if detected_count == 0:
+        print(f"  No trajectories with detected subgoals - plotting all {len(rewards)} trajectories")
+    else:
+      print(f"  Filtering {label.lower()} - using only {detected_count} trajectories where subgoal was detected")
+  
   # pad trajectories for analysis
-  padded_rewards, lengths = pad_trajectories(rewards)
+  padded_rewards, lengths = pad_trajectories(filtered_rewards)
   
   # mean reward per timestep
   print(f"Plotting mean reward per timestep of {label.lower()}...")
@@ -273,20 +337,42 @@ def plot_mean_results(rewards, output_dir, subgoal_reachs, label="Learned Reward
   ax.fill_between(timesteps, mean_reward - std_reward, mean_reward + std_reward, 
                     alpha=0.3, label='+-1 Std Dev')
 
+  # For distance plots, add special markers
+  is_distance_plot = "distance" in label.lower() or "dist" in label.lower()
+  
+  # Find and mark minimum point for distance plots
+  if is_distance_plot:
+    min_idx = np.nanargmin(mean_reward)
+    min_val = mean_reward[min_idx]
+    min_std = std_reward[min_idx]
+    ax.plot(min_idx, min_val, 'go', markersize=4, label='Min Distance', zorder=5)
+    ax.text(min_idx, min_val - min_std - 1.0, f'{min_val:.3f}\n±{min_std:.3f}', 
+            ha='center', fontsize=9, bbox=dict(boxstyle='round', facecolor='lightgreen', alpha=0.5))
+
   # aggregate each subgoal across trajectories and mark mean reaching timestep
   if subgoal_reachs is not None and len(subgoal_reachs) > 0:
     for subgoal_i, subgoal_steps in enumerate(subgoal_reachs):
-      reached_steps = [step for step in subgoal_steps if not np.isnan(step)]
+      reached_steps = [step for step in subgoal_steps if not np.isnan(step) and step >= 0]
       if len(reached_steps) == 0:
         continue
 
       mean_step = float(np.mean(reached_steps))
       mean_label = f'Subgoal mean reach' if subgoal_i == 0 else None
       ax.axvline(mean_step, color='crimson', linestyle=':', linewidth=2, alpha=0.95, label=mean_label)
+      
+      # For distance plots, mark intersection point with the mean curve (only for current subgoal)
+      if is_distance_plot and subgoal_i == 0:
+        mean_step_int = int(np.round(mean_step))
+        if 0 <= mean_step_int < len(mean_reward):
+          val_at_reach = mean_reward[mean_step_int]
+          ax.plot(mean_step_int, val_at_reach, 'ro', markersize=4, zorder=5)
+          ax.text(mean_step_int, val_at_reach + std_reward[mean_step_int] + 1.0, f'{val_at_reach:.3f}\n±{std_reward[mean_step_int]:.3f}', 
+                  ha='center', fontsize=9, bbox=dict(boxstyle='round', facecolor='lightyellow', alpha=0.5))
 
   ax.set_xlabel('Timestep', fontsize=FS_LABEL)
   ax.set_ylabel(label, fontsize=FS_LABEL)
-  ax.set_title(f'Mean {label} per Timestep (N={len(rewards)} trajectories)', 
+  num_trajs = len(filtered_rewards) if detected_flags is not None else len(rewards)
+  ax.set_title(f'Mean {label} per Timestep {source_label}(N={num_trajs} trajectories)', 
                 fontsize=FS_TITLE, fontweight='bold')
   ax.grid(True, alpha=0.3)
   ax.legend(fontsize=FS_LEGEND)
@@ -371,9 +457,11 @@ def main(args):
   
   # compute reward signals
   if not args.no_plot_trajs or not args.no_plot_subgoal_trajs:
-    (rewards, traj_ids, subgoal_rewards, subgoal_dists, subgoal_reachs
-    ) = compute_reward_signals(model, valid_loader, goal_emb, subgoal_embs, dist_scale, device)
+    (rewards, traj_ids, subgoal_rewards, subgoal_dists, subgoal_reachs, subgoal_reachs_gt
+    ) = compute_reward_signals(model, valid_loader, goal_emb, subgoal_embs, dist_scale, device, subgoal_frames=subgoal_frames)
     print(f"Computed {len(rewards)} reward signals")
+    if subgoal_reachs_gt is not None:
+      print(f"Using ground truth subgoal indices for distance plots")
 
 
   # plot trajectory lengths once using base rewards, to understand distribution of trajectory lengths and mean-std plots better
@@ -383,25 +471,23 @@ def main(args):
   # plot mean results
   plot_mean_results(rewards, out_dir, None, label="Learned Reward")
   
-  if not args.no_plot_trajs:
-    # save one trajectory plot per eval sample (or up to count)
-    plot_trajectory_samples(rewards, traj_ids, trajs_out_dir, None, label="Learned Reward", count=args.count)
-  
-
   # plot subgoal mean rewards and distances
   if subgoal_rewards is not None:
     plot_mean_results(subgoal_rewards, out_dir, subgoal_reachs, label="Learned Subgoal Reward")
     for i, subgoal_dist in enumerate(subgoal_dists):
-      plot_mean_results(subgoal_dist, out_dir, subgoal_reachs, label=f"Distance to Subgoal {i+1}")
+      # For distance plots, use ground truth subgoal indices if available, otherwise detected
+      using_gt = subgoal_reachs_gt and i < len(subgoal_reachs_gt)
+      reach_indices = subgoal_reachs_gt[i] if using_gt else subgoal_reachs[i]
+      source_label = "(GT)" if using_gt else "(detected)"
+      
+      # Derive boolean detection flags from reaching indices: -1 = not detected, >= 0 = detected
+      if using_gt:
+        detected_for_subgoal = [idx >= 0 for idx in reach_indices]
+      else:
+        detected_for_subgoal = None
+      
+      plot_mean_results(subgoal_dist, out_dir, [reach_indices], label=f"Distance to Subgoal {i+1}", detected_flags=detected_for_subgoal, source_label=source_label)
     
-    # plot for traj samples
-    if not args.no_plot_subgoal_trajs: 
-      plot_trajectory_samples(subgoal_rewards, traj_ids, trajs_out_dir, subgoal_reachs, label="Learned Subgoal Reward", count=args.count)
-
-    if args.plot_subgoal_dists:
-      for i, subgoal_dist in enumerate(subgoal_dists):
-        plot_trajectory_samples(subgoal_dist, traj_ids, trajs_out_dir, subgoal_reachs, label=f"Distance to Subgoal {i+1}", count=args.count)
-
     # save .txt with per trajectory subgoal reaching timesteps
     traj_substep = []
     for subgoal_idx, subgoal_steps in enumerate(subgoal_reachs):
@@ -415,6 +501,34 @@ def main(args):
       f.write("Trajectory ID: Subgoal i-th reaching timesteps (NaN if not reached)\n")
       for i, ts in enumerate(traj_substep):
         f.write(f"{i:>4.0f}: " + ", ".join([f"{t:3.0f}" for t in ts]) + "\n")
+    
+    
+  # plot trajectory-wise curves
+  if not args.no_plot_trajs:
+    # save one trajectory plot per eval sample (or up to count)
+    plot_trajectory_samples(rewards, traj_ids, trajs_out_dir, None, label="Learned Reward", count=args.count)
+  
+  if subgoal_rewards is not None:
+    # plot for traj samples
+    if not args.no_plot_subgoal_trajs: 
+      plot_trajectory_samples(subgoal_rewards, traj_ids, trajs_out_dir, subgoal_reachs, label="Learned Subgoal Reward", count=args.count)
+
+    if args.plot_subgoal_dists:
+      for i, subgoal_dist in enumerate(subgoal_dists):
+        # For distance trajectory plots, use ground truth subgoal indices if available, otherwise detected
+        using_gt = subgoal_reachs_gt and i < len(subgoal_reachs_gt)
+        reach_indices = subgoal_reachs_gt[i] if using_gt else subgoal_reachs[i]
+        source_label = "(GT) " if using_gt else "(D) "
+        
+        # Derive boolean detection flags from reaching indices: -1 = not detected, >= 0 = detected
+        if using_gt:
+          detected_for_subgoal = [idx >= 0 for idx in reach_indices]
+        else:
+          detected_for_subgoal = None
+        
+        plot_trajectory_samples(subgoal_dist, traj_ids, trajs_out_dir, [reach_indices], 
+                               label=f"Distance to Subgoal {i+1}", count=args.count, detected_flags=detected_for_subgoal, source_label=source_label)
+
 
   print(f"All results saved to: {out_dir}")
 

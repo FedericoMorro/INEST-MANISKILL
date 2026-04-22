@@ -54,12 +54,7 @@ def _squeeze_and_normalize(frame):
     return frame
 
 
-def test_render_vs_rgb_obs(num_steps: int = 10,
-                           seed: int = 22,
-                           save_comparison: bool = False,
-                           output_dir: str = "./out/render_comparison",
-                           robot_uids: str = "panda_wristcam",
-                           env_reward_type: str = "sparse"):
+def test_render_vs_rgb_obs(num_steps, seed, save_comparison, output_dir, robot_uids, env_reward_type):
     """
     Test that env.render() and obs with obs_mode='rgb' produce identical frames
     using the local StackPyramid environment.
@@ -441,7 +436,7 @@ def main():
     parser.add_argument(
         "--seed",
         type=int,
-        default=42,
+        default=22,
         help="Random seed"
     )
     parser.add_argument(
@@ -452,7 +447,7 @@ def main():
     parser.add_argument(
         "--output-dir",
         type=str,
-        default="./render_comparison",
+        default="./out/render_comparison",
         help="Output directory for saved comparisons"
     )
     parser.add_argument(

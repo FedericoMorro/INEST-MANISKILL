@@ -282,7 +282,7 @@ def make_env(
     env = wrappers.FrameStack(env, frame_stack)
     
   if reward_scaling != 1.0:
-    env = wrappers.RewardScaler(env, reward_scaling)
+    env = wrappers.RewardScale(env, reward_scaling)
 
   if not wrap:
     return env

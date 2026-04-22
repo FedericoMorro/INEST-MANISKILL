@@ -7,12 +7,16 @@ train_split: 0.0
 # Path to observation images
 obs_key: 'obs/sensor_data/base_camera/rgb'
 
-# Action keys to extract
+# Action keys to extract (can be interpreted as non-nested keys in the h5 file)
 action_keys:
   - 'actions'
+  - 'rewards'
+  - 'subgoal_idxs'
 
 # Robot state keys to extract
 robot_state_keys: null
 
 # Object state keys to extract
 objects_state_keys: null
+
+# Info keys to extract
