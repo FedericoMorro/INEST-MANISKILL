@@ -28,7 +28,7 @@ from torchkit import CheckpointManager
 from tqdm.auto import tqdm
 
 from inest_irl.maniskill3.stack_pyramid import MAX_SUBGOAL
-from utils import load_config_from_dir
+from inest_irl.utils.utils import load_config_from_dir
 from xirl import common
 from xirl.models import SelfSupervisedModel
 
@@ -38,9 +38,9 @@ DataLoaderType = typing.Dict[str, torch.utils.data.DataLoader]
 
 
 C_VALUE = 0.25   # additional reward for reaching any subgoal
-#DISTANCE_THRESHOLDS = [3, 3, 3, 3]  # distance threshold for considering a subgoal reached (in embedding space)
-DISTANCE_THRESHOLDS = [3.1, 10.0, 6.4, 8.2]
-PATIENCE_THRESHOLD = 0  # number of consecutive timesteps below distance threshold to consider subgoal reached
+DISTANCE_THRESHOLDS = [3, 3, 3, 3]  # distance threshold for considering a subgoal reached (in embedding space)
+#DISTANCE_THRESHOLDS = [3.1, 10.0, 6.4, 8.2]
+PATIENCE_THRESHOLD = 2  # number of consecutive timesteps below distance threshold to consider subgoal reached
 
 # report-friendly plotting defaults (compact figure size with readable text)
 FIGSIZE_TRAJ = (7.0, 3.6)
@@ -76,15 +76,7 @@ def setup_from_pretrain(experiment_path, use_cpu, diff_dataset_path=None):
   # load data -> debug active if use_cpu, otherwise use GPU-optimized dataloader settings
   train_loader = common.get_downstream_dataloaders(config, debug=use_cpu)["train"]
   #! note batch_size=1 is enforced in the dataloader
-
-  # if a different trajectory dataset path is provided, load it instead of the validation set for evaluation
-  if diff_dataset_path is not None:
-    print(f"Loading different trajectory dataset from: {diff_dataset_path}")
-    config.data.root = diff_dataset_path
-  else:
-    print("No different trajectory dataset provided - using validation set for evaluation")
-  valid_loader = common.get_downstream_dataloaders(config, debug=use_cpu)["valid"]
-
+  
   # search for subgoal_frames.json to plot also subgoal rewards
   subgoal_frames_path = Path(config.data.root) / "subgoal_frames.json"
   if subgoal_frames_path.exists():
@@ -94,6 +86,14 @@ def setup_from_pretrain(experiment_path, use_cpu, diff_dataset_path=None):
   else:
     subgoal_frames = None
     print("No subgoal frames file found - will only compute and plot rewards to final goal")
+
+  # if a different trajectory dataset path is provided, load it instead of the validation set for evaluation
+  if diff_dataset_path is not None:
+    print(f"Loading different trajectory dataset from: {diff_dataset_path}")
+    config.data.root = diff_dataset_path
+  else:
+    print("No different trajectory dataset provided - using validation set for evaluation")
+  valid_loader = common.get_downstream_dataloaders(config, debug=use_cpu)["valid"]
   
   return model, train_loader, valid_loader, subgoal_frames, global_step, device
 
@@ -137,7 +137,14 @@ def compute_goal_embedding(model, train_loader, subgoal_frames, device):
   else:
     subgoal_embs = None
   
-  return goal_emb, subgoal_embs, dist_scale
+  # add subgoal info for pickling, used by wrapper in rl training
+  subgoal_info = {
+    "c_value": 0.25,
+    "distance_thresholds": [3.1, 10.0, 6.4, 8.2],
+    "patience_threshold": 0,
+  }
+  
+  return goal_emb, subgoal_embs, dist_scale, subgoal_info
 
 
 def compute_reward_signals(model, valid_loader, goal_emb, subgoal_embs, dist_scale, device, subgoal_frames=None):
@@ -512,24 +519,24 @@ def main(args):
   # check for cached results in output directory
   checkpoint_dir = os.path.join(args.experiment_path, "checkpoints")
   cache_path = os.path.join(checkpoint_dir, f"cached_embeddings_step_{global_step}.pkl")
-  if not os.path.exists(cache_path):
+  if not os.path.exists(cache_path) or args.overwrite:
     print("No cached embedddings found - computing from scratch...")
 
     # compute goal embedding
-    goal_emb, subgoal_embs, dist_scale = compute_goal_embedding(model, train_loader, subgoal_frames, device)
+    goal_emb, subgoal_embs, dist_scale, subgoal_info = compute_goal_embedding(model, train_loader, subgoal_frames, device)
     print(f"Goal embedding computed - shape: {goal_emb.shape}")
     if subgoal_embs is not None:
       print(f"Subgoals identified: {len(subgoal_embs)} - shape: {subgoal_embs[0].shape}")
 
     # save goal and subgoal embeddings to cache for future use
     with open(cache_path, 'wb') as f:
-      pickle.dump((goal_emb, subgoal_embs, dist_scale), f)
+      pickle.dump((goal_emb, subgoal_embs, dist_scale, subgoal_info), f)
     print(f"Saved computed embeddings and distance scale to cache at: {cache_path}")
 
   else:
     print(f"Found cached embeddings at {cache_path} - loading...")
     with open(cache_path, 'rb') as f:
-      goal_emb, subgoal_embs, dist_scale = pickle.load(f)
+      goal_emb, subgoal_embs, dist_scale, subgoal_info = pickle.load(f)
     print(f"Goal embedding loaded - shape: {goal_emb.shape}")
     if subgoal_embs is not None:
       print(f"Subgoals identified: {len(subgoal_embs)} - shape: {subgoal_embs[0].shape}")
@@ -617,6 +624,8 @@ if __name__ == "__main__":
                           help="Whether to save plots for distances to subgoals (in embedding space)")
   arg_parser.add_argument("--diff_trajs_dataset", type=str, default=None,
                           help="Optional path to another trajectory dataset directory to check reward signal sanity")
+  arg_parser.add_argument("--overwrite", action='store_true', default=False,
+                          help="Wheter to overwrite cached embeddings")
   args = arg_parser.parse_args()
 
   main(args)

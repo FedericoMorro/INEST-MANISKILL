@@ -42,8 +42,8 @@ def get_config():
 
   config.reward_wrapper = ml_collections.ConfigDict()
   # Can be one of ['distance_to_goal', 'goal_classifier', 'inest', 'inest_knn', 'state_intrinsic', 'reds'].
-  #   currently supported -> ['sparse', 'env', 'env_state-intrinsic', 'goal_dist']
-  config.reward_wrapper.type = "goal_dist"
+  #   currently supported -> ['sparse', 'env', 'env_state-intrinsic', 'goal_dist', 'subgoal-dist']
+  config.reward_wrapper.type = "subgoal_dist"
   # Needed if using a vision-based learned reward wrapper
   config.reward_wrapper.pretrained_path = "/data/fmorro/inest-maniskill/_experiments/pretrain/render-cam/"
 

@@ -334,7 +334,7 @@ def wrap_env(env, reward_type, rank, train_flag, exp_dir, learned_reward_pretrai
   if os.path.exists(cache_path):
     print(f"Loading precomputed goal embedding from {cache_path}")
     with open(cache_path, "rb") as fp:
-      goal_emb, subgoal_embs, dist_scale = pickle.load(fp)
+      goal_emb, subgoal_embs, dist_scale, subgoal_info = pickle.load(fp)
   else:
     print("No precomputed goal embedding found, computing now...")
     from inest_irl.utils.compute_learned_return import compute_goal_embedding
@@ -347,16 +347,25 @@ def wrap_env(env, reward_type, rank, train_flag, exp_dir, learned_reward_pretrai
     else:
       subgoal_frames = None
       print("No subgoal frames file found - will only compute and plot rewards to final goal")
-    goal_emb, subgoal_embs, dist_scale = compute_goal_embedding(model, train_loader, device, subgoal_frames=subgoal_frames)
+    goal_emb, subgoal_embs, dist_scale, subgoal_info = compute_goal_embedding(model, train_loader, device, subgoal_frames=subgoal_frames)
     with open(cache_path, "wb") as fp:
-      pickle.dump((goal_emb, subgoal_embs, dist_scale), fp)
+      pickle.dump((goal_emb, subgoal_embs, dist_scale, subgoal_info), fp)
     print(f"Computed and cached goal embedding at {cache_path}")
+    
+  print(subgoal_embs)
+  print(subgoal_info)
   
   if reward_type == "goal_dist":
     return wrappers.GoalDistanceLearnedVisualRewardWrapper(
       env=env, rank=rank, train_flag=train_flag, exp_dir=exp_dir,
       model=model, device=device, #res_hw=model_config.data_augmentation.image_size,  -> should be already 128x128
       goal_emb=goal_emb, dist_scale=dist_scale,
+    )
+  elif reward_type == "subgoal_dist":
+    return wrappers.SubgoalDistanceLearnedVisualRewardWrapper(
+      env=env, rank=rank, train_flag=train_flag, exp_dir=exp_dir,
+      model=model, device=device, #res_hw=model_config.data_augmentation.image_size,  -> should be already 128x128
+      goal_emb=goal_emb, subgoal_embs=subgoal_embs, dist_scale=dist_scale, subgoal_info=subgoal_info,
     )
   else:
      raise NotImplementedError(f"Reward wrapper type {reward_type} not implemented yet.")

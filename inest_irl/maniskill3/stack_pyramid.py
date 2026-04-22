@@ -79,6 +79,7 @@ class StackPyramidEnv(BaseEnv):
         
         kwargs["reward_mode"] = env_reward_type
         self.max_subgoal = MAX_SUBGOAL
+        self.curr_subgoal = None  # will be initialized to 0 at the beginning of the episode in reset()
 
         self.robot_init_qpos_noise = robot_init_qpos_noise
         super().__init__(*args, robot_uids=robot_uids, **kwargs)

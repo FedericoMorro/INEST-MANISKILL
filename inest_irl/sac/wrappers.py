@@ -511,13 +511,56 @@ class GoalDistanceLearnedVisualRewardWrapper(LearnedVisualRewardWrapper):
 
   def _get_reward_from_image(self, image):
     """Forward the pixels through the model and compute the reward."""
-    # print("Computing reward from image dist.")
     image_tensor = self._to_tensor(image)
     emb = self.model.infer(image_tensor).numpy().embs
-    # emb = self._model.module.infer(image_tensor).numpy().embs
     dist = np.linalg.norm(self.goal_emb - emb)
     rew = - dist * self.dist_scale
     return rew
+
+
+class SubgoalDistanceLearnedVisualRewardWrapper(LearnedVisualRewardWrapper):
+    """Replace the environment reward with distances from subgoals in the embedding space."""
+    
+    def __init__(
+        self,
+        goal_emb,
+        subgoal_embs,
+        dist_scale,
+        subgoal_info,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+
+        self.goal_emb = np.atleast_2d(goal_emb)
+        self.subgoal_embs = [np.atleast_2d(sg) for sg in subgoal_embs]
+        self.dist_scale = dist_scale
+        self.max_subgoal = len(subgoal_embs)
+        self.c_value = subgoal_info["c_value"]
+        self.distance_thresholds = subgoal_info["distance_thresholds"]
+        self.patience_threshold = subgoal_info["patience_threshold"]
+        
+        self.curr_detected_subgoal = 0
+        
+        print(f"Initialized SubgoalDistanceLearnedVisualRewardWrapper with goal_emb shape {self.goal_emb.shape},"
+              f"{len(self.subgoal_embs)} subgoal embeddings, distance_scale {dist_scale}, and subgoal_info {subgoal_info}")
+        
+    def _update_detected_subgoal(self, emb):
+        """Update the currently detected subgoal based on the current embedding."""
+        if self.curr_detected_subgoal < self.max_subgoal:
+            target_emb = self.subgoal_embs[self.curr_detected_subgoal]
+            dist = np.linalg.norm(target_emb - emb)
+            if dist < self.distance_thresholds[self.curr_detected_subgoal]:
+                self.curr_detected_subgoal += 1
+        
+    def _get_reward_from_image(self, image):
+        """Compute reward based on distance to current subgoal (updating it), with bonus for which subgoal is currently detected."""
+        image_tensor = self._to_tensor(image)
+        emb = self.model.infer(image_tensor).numpy().embs
+        self._update_detected_subgoal(emb)
+        dist = np.linalg.norm(self.subgoal_embs[self.curr_detected_subgoal] - emb)
+        rew = - dist * self.dist_scale + self.c_value * self.curr_detected_subgoal
+        return rew
+        
 
 
 # TODO: NOT TESTED
