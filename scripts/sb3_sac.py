@@ -76,6 +76,7 @@ class WandbCallback(BaseCallback):
                     rewards = [ep_info["r"] for ep_info in self.model.ep_info_buffer]
                     lengths = [ep_info["l"] for ep_info in self.model.ep_info_buffer]
                     metrics['rollout/ep_rew_mean'] = float(np.mean(rewards))
+                    metrics['rollout/ep_rew_std'] = float(np.std(rewards))
                     metrics['rollout/ep_len_mean'] = float(np.mean(lengths))
                     if hasattr(self.model, 'ep_success_buffer') and len(self.model.ep_success_buffer) > 0:
                         successes = [float(s) for s in self.model.ep_success_buffer]
@@ -83,14 +84,29 @@ class WandbCallback(BaseCallback):
                     else:
                         metrics['rollout/ep_success_mean'] = float(0)
                         
-                # Extract subgoal stats if available
-                if hasattr(self.model, 'log_subgoal_buffer') and len(self.model.log_subgoal_buffer) > 0:
-                    for subgoal, count in self.model.log_subgoal_buffer.items():
-                        if subgoal == 0:
-                            metrics[f"rollout/failed_%"] = float(count)
-                        else:
-                            metrics[f"rollout/subgoal_{subgoal}_%"] = float(count)
-                    self.model.log_subgoal_buffer = {}
+                # Extract additional episode info: subgoals, env_reward, detected_subgoals
+                if hasattr(self.model, 'ep_add_info_buffer') and len(self.model.ep_add_info_buffer) > 0:
+                    
+                    if "subgoal" in self.model.ep_add_info_buffer:
+                        for subgoal, count in self.model.ep_add_info_buffer.get("subgoal", {}).items():
+                            if subgoal == 0:
+                                metrics[f"rollout/failed_%"] = float(count)
+                            else:
+                                metrics[f"rollout/subgoal_{subgoal}_%"] = float(count)
+                    
+                    if "env_reward" in self.model.ep_add_info_buffer:
+                        metrics["rollout/ep_env_rew_mean"] = float(np.mean(self.model.ep_add_info_buffer["env_reward"]))
+                        metrics["rollout/ep_env_rew_std"] = float(np.std(self.model.ep_add_info_buffer["env_reward"]))
+                        
+                    if "detected_subgoal" in self.model.ep_add_info_buffer:
+                        for subgoal, count in self.model.ep_add_info_buffer.get("detected_subgoal", {}).items():
+                            if subgoal == 0:
+                                metrics[f"rollout/detected_failed_%"] = float(count)
+                            else:
+                                metrics[f"rollout/detected_subgoal_{subgoal}_%"] = float(count)
+                                
+                    self.ep_add_info_buffer.clear()
+                        
                     
             except Exception:
                 pass

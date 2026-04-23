@@ -21,6 +21,8 @@ from stable_baselines3.common.utils import safe_mean, should_collect_more_steps
 from stable_baselines3.common.vec_env import VecEnv
 from stable_baselines3.her.her_replay_buffer import HerReplayBuffer
 
+from stable_baselines3.common.subgoal_utils import subgoals_list_to_perc_dict
+
 SelfOffPolicyAlgorithm = TypeVar("SelfOffPolicyAlgorithm", bound="OffPolicyAlgorithm")
 
 
@@ -436,24 +438,23 @@ class OffPolicyAlgorithm(BaseAlgorithm):
         if len(self.ep_success_buffer) > 0:
             self.logger.record("rollout/success_rate", safe_mean(self.ep_success_buffer))
             
-        # add subgoal logs to item to be taken and logged to wandb
-        if len(self.ep_info_buffer) > 0 and "subgoal" in self.ep_info_buffer[0]:
-            episodes_subgoals = [ep_info["subgoal"] for ep_info in self.ep_info_buffer]
-            max_subgoal = self.env.get_attr("max_subgoal", 0)[0]
-            self.log_subgoal_buffer = {i: 0 for i in range(max_subgoal + 1)}
-            for subgoal in episodes_subgoals:
-                # non-cumulative for 0
-                if subgoal == 0:
-                    self.log_subgoal_buffer[0] += 1
-                # cumulative for others
-                else:
-                    for i in range(1, subgoal + 1):
-                        self.log_subgoal_buffer[i] += 1
-
-            # normalize by number of episodes
-            for subgoal in self.log_subgoal_buffer:
-                self.log_subgoal_buffer[subgoal] /= len(episodes_subgoals)
-                    
+        # add subgoal logs, env_reward logs, and detected_subgoal logs to be taken and logged to wandb
+        if len(self.ep_info_buffer) > 0:
+            self.ep_add_info_buffer = {}
+            
+            if "subgoal" in self.ep_info_buffer[0] and self.ep_info_buffer[0]["subgoal"] is not None:
+                episodes_subgoals = [ep_info["subgoal"] for ep_info in self.ep_info_buffer]
+                max_subgoal = self.env.get_attr("max_subgoal", 0)[0]
+                self.ep_add_info_buffer["subgoal"] = subgoals_list_to_perc_dict(episodes_subgoals, max_subgoal, len(episodes_subgoals))
+            
+            if "env_reward" in self.ep_info_buffer[0] and self.ep_info_buffer[0]["env_reward"] is not None:
+                episode_env_rewards = [ep_info["env_reward"] for ep_info in self.ep_info_buffer]
+                self.ep_add_info_buffer["env_reward"] = episode_env_rewards
+                
+            if "detected_subgoal" in self.ep_info_buffer[0] and self.ep_info_buffer[0]["detected_subgoal"] is not None:
+                episodes_detected_subgoals = [ep_info["detected_subgoal"] for ep_info in self.ep_info_buffer]
+                max_subgoal = self.env.get_attr("max_subgoal", 0)[0]
+                self.ep_add_info_buffer["detected_subgoal"] = subgoals_list_to_perc_dict(episodes_detected_subgoals, max_subgoal, len(episodes_detected_subgoals))
 
         # add time logs to item to be taken and logged to wandb
         self.log_time_buffer = {

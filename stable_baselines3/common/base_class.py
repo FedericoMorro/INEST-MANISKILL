@@ -450,9 +450,13 @@ class BaseAlgorithm(ABC):
             dones = np.array([False] * len(infos))
         for idx, info in enumerate(infos):
             maybe_ep_info = info.get("episode")
-            maybe_is_success = info.get("is_success") or info.get("success")
+            maybe_is_success = info.get("is_success") or info.get("success")    # added since we use "success"
             if maybe_ep_info is not None:
-                maybe_ep_info["subgoal"] = info.get("subgoal", -1)
+                
+                maybe_ep_info["subgoal"] = info.get("subgoal", None)
+                maybe_ep_info["env_reward"] = info.get("env_reward", None)
+                maybe_ep_info["detected_subgoal"] = info.get("detected_subgoal", None)
+                
                 self.ep_info_buffer.extend([maybe_ep_info])
             if maybe_is_success is not None and dones[idx]:
                 self.ep_success_buffer.append(maybe_is_success)

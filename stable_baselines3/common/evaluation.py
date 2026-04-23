@@ -8,6 +8,8 @@ import numpy as np
 from stable_baselines3.common import type_aliases
 from stable_baselines3.common.vec_env import DummyVecEnv, VecEnv, VecMonitor, is_vecenv_wrapped
 
+from stable_baselines3.common.subgoal_utils import subgoals_list_to_perc_dict
+
 
 def evaluate_policy(
     model: "type_aliases.PolicyPredictor",
@@ -172,33 +174,16 @@ def evaluate_policy(
         assert mean_reward > reward_threshold, "Mean reward below threshold: " f"{mean_reward:.2f} < {reward_threshold:.2f}"
         
     
-    def subgoals_list_to_perc_dict(subgoals_list, n_episodes):
-        subgoals_dict = {i: 0 for i in range(max_subgoal + 1)}
-        for subgoal in subgoals_list:
-            # non-cumulative for 0
-            if subgoal == 0:
-                subgoals_dict[0] += 1
-            # cumulative for others
-            else:
-                for i in range(1, subgoal + 1):
-                    subgoals_dict[i] += 1
-
-        # normalize by number of episodes
-        for subgoal in subgoals_dict:
-            subgoals_dict[subgoal] /= n_episodes
-            
-        return subgoals_dict
-        
     additional_info = {}
-
+    
     if return_episode_subgoals:
-        additional_info["episode_subgoals"] = subgoals_list_to_perc_dict(episodes_subgoals, n_eval_episodes)
+        additional_info["episode_subgoals"] = subgoals_list_to_perc_dict(episodes_subgoals, max_subgoal, n_eval_episodes)
         
     if return_env_reward:
         additional_info["episode_env_rewards"] = episode_env_rewards
         
     if return_detected_subgoals:
-        additional_info["episodes_detected_subgoals"] = subgoals_list_to_perc_dict(episodes_detected_subgoals, n_eval_episodes)
+        additional_info["episodes_detected_subgoals"] = subgoals_list_to_perc_dict(episodes_detected_subgoals, max_subgoal, n_eval_episodes)
         
     if additional_info:
         if return_episode_rewards:
