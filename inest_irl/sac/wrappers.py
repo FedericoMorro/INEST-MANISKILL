@@ -551,13 +551,19 @@ class SubgoalDistanceLearnedVisualRewardWrapper(LearnedVisualRewardWrapper):
             dist = np.linalg.norm(target_emb - emb)
             if dist < self.distance_thresholds[self.curr_detected_subgoal]:
                 self.curr_detected_subgoal += 1
+                
+    def _curr_subgoal_to_goal_emb_distance(self, emb):
+        if self.curr_detected_subgoal < self.max_subgoal:
+            return np.linalg.norm(self.subgoal_embs[self.curr_detected_subgoal] - emb)
+        else:
+            return np.linalg.norm(self.subgoal_embs[-1] - emb)
         
     def _get_reward_from_image(self, image):
         """Compute reward based on distance to current subgoal (updating it), with bonus for which subgoal is currently detected."""
         image_tensor = self._to_tensor(image)
         emb = self.model.infer(image_tensor).numpy().embs
         self._update_detected_subgoal(emb)
-        dist = np.linalg.norm(self.subgoal_embs[self.curr_detected_subgoal] - emb)
+        dist = self._curr_subgoal_to_goal_emb_distance(emb)
         rew = - dist * self.dist_scale + self.c_value * self.curr_detected_subgoal
         return rew
         

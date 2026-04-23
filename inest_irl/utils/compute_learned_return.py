@@ -140,7 +140,7 @@ def compute_goal_embedding(model, train_loader, subgoal_frames, device):
   # add subgoal info for pickling, used by wrapper in rl training
   subgoal_info = {
     "c_value": 0.25,
-    "distance_thresholds": [3.1, 10.0, 6.4, 8.2],
+    "distance_thresholds": [3.0, 3.0, 3.0, 3.0],
     "patience_threshold": 0,
   }
   
@@ -520,7 +520,7 @@ def main(args):
   checkpoint_dir = os.path.join(args.experiment_path, "checkpoints")
   cache_path = os.path.join(checkpoint_dir, f"cached_embeddings_step_{global_step}.pkl")
   if not os.path.exists(cache_path) or args.overwrite:
-    print("No cached embedddings found - computing from scratch...")
+    print("No cached embedddings found (or overwrite flag is set) - computing from scratch...")
 
     # compute goal embedding
     goal_emb, subgoal_embs, dist_scale, subgoal_info = compute_goal_embedding(model, train_loader, subgoal_frames, device)
