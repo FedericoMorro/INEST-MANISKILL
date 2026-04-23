@@ -2,8 +2,8 @@
 
 ## Modifications
 1. Added support for target entropy annealing in SAC.
-2. Added support for returning episode subgoals during evaluation, and env reward for learned reward evaluation.
-3. Log rollout metrics to W&B.
+2. Added support for returning episode subgoals during evaluation, env reward for learned reward evaluation, and detected subgoals for subgoal learned reward evaluation.
+3. Log rollout metrics to W&B: added also support for env reward and subgoal learned reward evaluation metrics.
 
 ## Edited Files
 - `sac/sac.py`: 1

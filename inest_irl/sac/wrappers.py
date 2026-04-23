@@ -567,6 +567,10 @@ class SubgoalDistanceLearnedVisualRewardWrapper(LearnedVisualRewardWrapper):
         rew = - dist * self.dist_scale + self.c_value * self.curr_detected_subgoal
         return rew
         
+    def step(self, action):
+        obs, reward, terminated, truncated, info = super().step(action)
+        info["detected_subgoal"] = self.curr_detected_subgoal
+        return obs, reward, terminated, truncated, info
 
 
 # TODO: NOT TESTED

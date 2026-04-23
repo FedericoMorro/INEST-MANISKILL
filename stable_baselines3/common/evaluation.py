@@ -22,6 +22,7 @@ def evaluate_policy(
 
     return_episode_subgoals: bool = False,
     return_env_reward: bool = False,
+    return_detected_subgoals: bool = False,
 
 ) -> tuple[float, float] | tuple[list[float], list[int]]:
     """
@@ -89,6 +90,9 @@ def evaluate_policy(
         
     if return_env_reward:
         episode_env_rewards = []
+        
+    if return_detected_subgoals:
+        episodes_detected_subgoals = []
 
     episode_counts = np.zeros(n_envs, dtype="int")
     # Divides episodes among different sub environments in the vector as evenly as possible
@@ -138,6 +142,8 @@ def evaluate_policy(
                                 episodes_subgoals.append(info.get("subgoal", 0))
                             if return_env_reward:
                                 episode_env_rewards.append(info.get("env_reward", 0))
+                            if return_detected_subgoals:
+                                episodes_detected_subgoals.append(info.get("detected_subgoal", 0))
                                 
                     else:
                         episode_rewards.append(current_rewards[i])
@@ -148,6 +154,8 @@ def evaluate_policy(
                             episodes_subgoals.append(info.get("subgoal", 0))
                         if return_env_reward:
                             episode_env_rewards.append(info.get("env_reward", 0))
+                        if return_detected_subgoals:
+                            episodes_detected_subgoals.append(info.get("detected_subgoal", 0))
 
                     current_rewards[i] = 0
                     current_lengths[i] = 0
@@ -162,30 +170,35 @@ def evaluate_policy(
 
     if reward_threshold is not None:
         assert mean_reward > reward_threshold, "Mean reward below threshold: " f"{mean_reward:.2f} < {reward_threshold:.2f}"
-      
+        
+    
+    def subgoals_list_to_perc_dict(subgoals_list, n_episodes):
+        subgoals_dict = {i: 0 for i in range(max_subgoal + 1)}
+        for subgoal in subgoals_list:
+            # non-cumulative for 0
+            if subgoal == 0:
+                subgoals_dict[0] += 1
+            # cumulative for others
+            else:
+                for i in range(1, subgoal + 1):
+                    subgoals_dict[i] += 1
+
+        # normalize by number of episodes
+        for subgoal in subgoals_dict:
+            subgoals_dict[subgoal] /= n_episodes
+            
+        return subgoals_dict
         
     additional_info = {}
 
     if return_episode_subgoals:
-        # convert episodes_subgoals to dict
-        episode_subgoals_dict = {i: 0 for i in range(max_subgoal + 1)}
-        for subgoal in episodes_subgoals:
-            # non-cumulative for 0
-            if subgoal == 0:
-                episode_subgoals_dict[0] += 1
-            # cumulative for others
-            else:
-                for i in range(1, subgoal + 1):
-                    episode_subgoals_dict[i] += 1
-
-        # normalize by number of episodes
-        for subgoal in episode_subgoals_dict:
-            episode_subgoals_dict[subgoal] /= n_eval_episodes
-            
-        additional_info["episode_subgoals"] = episode_subgoals_dict
+        additional_info["episode_subgoals"] = subgoals_list_to_perc_dict(episodes_subgoals, n_eval_episodes)
         
     if return_env_reward:
         additional_info["episode_env_rewards"] = episode_env_rewards
+        
+    if return_detected_subgoals:
+        additional_info["episodes_detected_subgoals"] = subgoals_list_to_perc_dict(episodes_detected_subgoals, n_eval_episodes)
         
     if additional_info:
         if return_episode_rewards:

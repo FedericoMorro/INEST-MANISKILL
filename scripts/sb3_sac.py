@@ -111,7 +111,11 @@ class WandbCallback(BaseCallback):
 
 class EvalSaveCallback(BaseCallback):
     """Periodic evaluation callback that saves returns, saves models, and logs to wandb."""
-    def __init__(self, eval_env, exp_dir, eval_freq, checkpoint_freq, n_eval_episodes=5, verbose=0, learned_reward=False):
+    def __init__(self,
+                 eval_env, exp_dir,
+                 eval_freq, checkpoint_freq,
+                 n_eval_episodes=5, verbose=0,
+                 learned_reward=False, subgoal_reward=False):
         super().__init__(verbose)
         self.eval_env = eval_env
         self.exp_dir = exp_dir
@@ -119,6 +123,8 @@ class EvalSaveCallback(BaseCallback):
         self.checkpoint_freq = checkpoint_freq
         self.n_eval_episodes = n_eval_episodes
         self.learned_reward = learned_reward
+        self.subgoal_reward = subgoal_reward
+        
         self._last_eval = 0
         self._last_checkpoint = 0
         self.best_mean_reward = float("-inf")
@@ -142,12 +148,14 @@ class EvalSaveCallback(BaseCallback):
                     return_episode_rewards=True,
                     return_episode_subgoals=True,
                     return_env_reward=self.learned_reward,
+                    return_detected_subgoals=self.subgoal_reward,
                 )
                 mean_reward = float(np.mean(rewards))
                 std_reward = float(np.std(rewards))
                 mean_length = float(np.mean(lengths))
                 subgoals_dict = additional_info.get("episode_subgoals", {})
                 env_rewards = additional_info.get("episode_env_rewards", [])
+                detected_subgoals_dict = additional_info.get("episodes_detected_subgoals", {})
             except Exception as e:
                 logging.warning(f"Evaluation failed at step {step}: {e}")
                 mean_reward = float("nan")
@@ -155,6 +163,7 @@ class EvalSaveCallback(BaseCallback):
                 mean_length = float("nan")
                 subgoals_dict = {}
                 env_rewards = []
+                detected_subgoals_dict = {}
                 
             # Save evaluation results to JSON
             eval_dir = os.path.join(self.exp_dir, "evaluation")
@@ -169,6 +178,7 @@ class EvalSaveCallback(BaseCallback):
                         "rewards": rewards if isinstance(rewards, list) else list(rewards),
                         "subgoals": subgoals_dict,
                         "env_rewards": env_rewards,
+                        "detected_subgoals": detected_subgoals_dict,
                     }, f, indent=2)
             except Exception:
                 pass
@@ -193,10 +203,17 @@ class EvalSaveCallback(BaseCallback):
                             log_dict[f"eval/failed_%"] = val
                         else:
                             log_dict[f"eval/subgoal_{subgoal}_%"] = val
-                            
+
                     if env_rewards:
                         log_dict["eval/mean_env_reward"] = float(np.mean(env_rewards))
                         log_dict["eval/std_env_reward"] = float(np.std(env_rewards))
+                        
+                    if detected_subgoals_dict:
+                        for subgoal, val in detected_subgoals_dict.items():
+                            if subgoal == 0:
+                                log_dict[f"eval/detected_failed_%"] = val
+                            else:
+                                log_dict[f"eval/detected_subgoal_{subgoal}_%"] = val
 
                     wandb.log(log_dict, step=step)
                 except Exception:
@@ -440,6 +457,7 @@ def main(_):
             n_eval_episodes=int(config.num_eval_episodes),
             verbose=1,
             learned_reward=(config.reward_wrapper.type not in ["sparse", "env", "env_state-intrinsic"]),
+            subgoal_reward=(config.reward_wrapper.type in ["subgoal_dist"]),
         )
     )
     logging.info(f"Evaluation frequency: {config.eval_frequency} steps")
