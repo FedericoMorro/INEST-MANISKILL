@@ -5,6 +5,7 @@ Example usage:
 
 python inest_irl/utils/eval_return.py
     --experiment_path ../data/inest-maniskill/_experiments/pretrain/render-cam/
+    [--cache_only]
 
 
 # for different trajs
@@ -140,7 +141,7 @@ def compute_goal_embedding(model, train_loader, subgoal_frames, device):
   # add subgoal info for pickling, used by wrapper in rl training
   subgoal_info = {
     "c_value": 0.25,
-    "distance_thresholds": [3.0, 3.0, 3.0, 3.0],
+    "distance_thresholds": [3.1, 10.0, 6.4, 8.2], #[3.0, 3.0, 3.0, 3.0],
     "patience_threshold": 0,
   }
   
@@ -519,7 +520,7 @@ def main(args):
   # check for cached results in output directory
   checkpoint_dir = os.path.join(args.experiment_path, "checkpoints")
   cache_path = os.path.join(checkpoint_dir, f"cached_embeddings_step_{global_step}.pkl")
-  if not os.path.exists(cache_path) or args.overwrite:
+  if not os.path.exists(cache_path) or args.overwrite or args.cache_only:
     print("No cached embedddings found (or overwrite flag is set) - computing from scratch...")
 
     # compute goal embedding
@@ -532,6 +533,10 @@ def main(args):
     with open(cache_path, 'wb') as f:
       pickle.dump((goal_emb, subgoal_embs, dist_scale, subgoal_info), f)
     print(f"Saved computed embeddings and distance scale to cache at: {cache_path}")
+    
+    if args.cache_only:
+      print("Cache only flag is set - exiting after caching embeddings.")
+      return
 
   else:
     print(f"Found cached embeddings at {cache_path} - loading...")
@@ -626,6 +631,8 @@ if __name__ == "__main__":
                           help="Optional path to another trajectory dataset directory to check reward signal sanity")
   arg_parser.add_argument("--overwrite", action='store_true', default=False,
                           help="Wheter to overwrite cached embeddings")
+  arg_parser.add_argument("--cache_only", action='store_true', default=False,
+                          help="Whether to JUST update the cache (no plotting)")
   args = arg_parser.parse_args()
 
   main(args)

@@ -14,3 +14,5 @@
     - `dump_logs()`
 - `common/base_class.py`: 3
     - `_update_info_buffer()`
+- `common/subgoal_utils.py` (created): 2, 3
+    - `subgoals_list_to_perc_dict()`

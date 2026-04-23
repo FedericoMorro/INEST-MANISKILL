@@ -28,8 +28,6 @@ def get_config():
   # ============================================== #
   # The root directory where experiments will be saved.
   config.root_dir = "/home/fmorro/INEST-MANISKILL/experiments/pretrain"
-  # Rng seed. Set this to `none` to disable seeding.
-  config.seed = 1
   # cudnn-related parameters that affect reproducibility.
   config.cudnn_deterministic = False
   config.cudnn_benchmark = True
@@ -49,7 +47,7 @@ def get_config():
   #INITIAL DATASET
   #config.data.root = "/tmp/xirl/xirl_dataset/xmagical"
   #SUBTASK DATASET
-  config.data.root = "/data/fmorro/inest-maniskill/dataset-render-cam"
+  config.data.root = "/data/fmorro/inest-maniskill/dataset-rc-1000"
   # Absolute path to the dataset root.
   # The mini-batch size. Note this only specifies the number of videos to
   # load frames from in a single batch. The effective batch size is actually
@@ -220,7 +218,7 @@ def get_config():
   # ============================================== #
   config.optim = ml_collections.ConfigDict()
 
-  config.optim.train_max_iters = 10_000
+  config.optim.train_max_iters = 20_000
   # L2 regularization.
   config.optim.weight_decay = 1e-4
   # Learning rate.
@@ -229,5 +227,7 @@ def get_config():
   # ============================================== #
   # End of config file
   # ============================================== #
+  
+  config.seed = None  #! do not set this here, it will be set in pretrain.py based on the command line argument
 
   return config

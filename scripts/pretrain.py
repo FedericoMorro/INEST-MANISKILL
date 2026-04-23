@@ -20,12 +20,14 @@ import os.path as osp
 from absl import app
 from absl import flags
 from absl import logging
+import copy
 from ml_collections import config_flags
 import torch
 from torchkit import CheckpointManager
 from torchkit import experiment
 from torchkit import Logger
 from torchkit.utils.py_utils import Stopwatch
+from tqdm.rich import tqdm as rich_tqdm
 from xirl import common
 import wandb
 
@@ -37,10 +39,12 @@ from inest_irl.utils.utils import setup_experiment
 FLAGS = flags.FLAGS
 
 flags.DEFINE_string("experiment_name", None, "Experiment name.")
+flags.DEFINE_integer("seed", 22, "RNG seed for experiment. Set to `none` to disable seeding.")
 flags.DEFINE_boolean("resume", False, "Whether to resume training.")
 flags.DEFINE_string("device", "cuda:0", "The compute device.")
 flags.DEFINE_boolean("raw_imagenet", False, "")
 flags.DEFINE_boolean("wandb", False, "Log on W&B.")
+flags.DEFINE_boolean("verbose", True, "Whether to print out training logs.")
 
 config_flags.DEFINE_config_file(
     "config",
@@ -79,6 +83,7 @@ def main(_):
   logging.info("Using device: %s", device)
 
   # Set RNG seeds.
+  config.seed = copy.deepcopy(FLAGS.seed)
   if config.seed is not None:
     logging.info("Pretraining experiment seed: %d", config.seed)
     experiment.seed_rngs(config.seed)
@@ -105,6 +110,9 @@ def main(_):
       model=model,
       optimizer=optimizer,
   )
+  
+  if not FLAGS.verbose:
+    prog_bar = rich_tqdm(total=config.optim.train_max_iters, desc="Pretraining", unit="iter")
 
   global_step = checkpoint_manager.restore_or_initialize()
   total_batches = max(1, len(pretrain_loaders["train"]))
@@ -157,25 +165,30 @@ def main(_):
         # Save model checkpoint.
         if not global_step % config.checkpointing_frequency:
           checkpoint_manager.save(global_step)
-
+          
+        if not FLAGS.verbose:
+          prog_bar.update(1)
+          
         # Exit if complete.
         global_step += 1
         if global_step > config.optim.train_max_iters:
           complete = True
           break
 
-        time_per_iter = stopwatch.elapsed()
-        remaining_time = time_per_iter * (config.optim.train_max_iters - global_step)
-        logging.info(
-            "Iter[{}/{}] (Epoch {}), {:.6f}s/iter (rem: {:.0f}m{:02.0f}s), Loss: {:.3f}".format(
-                global_step,
-                config.optim.train_max_iters,
-                epoch,
-                time_per_iter,
-                remaining_time // 60,
-                remaining_time % 60,
-                train_loss["train/total_loss"],
-            ))
+        if FLAGS.verbose:
+          time_per_iter = stopwatch.elapsed()
+          remaining_time = time_per_iter * (config.optim.train_max_iters - global_step)
+          logging.info(
+              "Iter[{}/{}] (Epoch {}), {:.6f}s/iter (rem: {:.0f}m{:02.0f}s), Loss: {:.3f}".format(
+                  global_step,
+                  config.optim.train_max_iters,
+                  epoch,
+                  time_per_iter,
+                  remaining_time // 60,
+                  remaining_time % 60,
+                  train_loss["train/total_loss"],
+              ))
+          
         if FLAGS.wandb:
           wandb.log({
               "train/total_loss": train_loss["train/total_loss"],
