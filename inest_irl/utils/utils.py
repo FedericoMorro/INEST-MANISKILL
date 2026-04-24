@@ -223,7 +223,7 @@ def make_env(
   learned_reward_data = None,
   add_episode_monitor = True,
   save_video = False,
-  wrap=True,
+  wrap = True,
 ):
   """Env factory with wrapping.
 

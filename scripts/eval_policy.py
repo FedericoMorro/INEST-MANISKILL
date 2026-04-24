@@ -165,23 +165,41 @@ def _save_video(video_path, frames, fps=10):
         import traceback
         traceback.print_exc()
 
-def _save_reward_plot(plot_path, step_rewards, subgoal_idxs=None):
+def _save_reward_plot(plot_path, step_rewards, subgoal_idxs=None, env_rewards=None, detected_subgoal_idxs=None):
     """Save reward curve plot as PNG with per-step and cumulative plots."""
     try:
         plt.figure(figsize=FIGSIZE_TRAJ)
+        ax1 = plt.gca()
         
-        # Rewards with average line
-        plt.plot(step_rewards, linewidth=2, color='steelblue', label='Reward')
-        plt.axhline(np.mean(step_rewards), color='green', linestyle=':', linewidth=2, alpha=0.7,
+        ax1.plot(step_rewards, linewidth=2, color='steelblue', label='Reward')
+        ax1.axhline(np.mean(step_rewards), color='blue', linestyle='-.', linewidth=2, alpha=0.5,
                     label=f'Avg: {np.mean(step_rewards):.2f}')
         if subgoal_idxs:
             for idx in subgoal_idxs:
-                plt.axvline(idx, color='red', linestyle='--', alpha=0.7, label='Subgoal(s)' if idx == subgoal_idxs[0] else "")
-        plt.xlabel('Step', fontsize=FS_LABEL)
-        plt.ylabel('Reward', fontsize=FS_LABEL)
-        plt.title('Reward', fontsize=FS_TITLE, fontweight='bold')
-        plt.legend(fontsize=FS_LEGEND)
-        plt.grid(alpha=0.3)
+                ax1.axvline(idx, color='purple', linestyle=':', alpha=0.7, label='GT Subgoal(s)' if idx == subgoal_idxs[0] else "")
+        if detected_subgoal_idxs:
+            for idx in detected_subgoal_idxs:
+                ax1.axvline(idx, color='green', linestyle='--', alpha=0.7, label='Detected Subgoal(s)' if idx == detected_subgoal_idxs[0] else "")
+
+        ax2 = None
+        if env_rewards is not None:
+            ax2 = ax1.twinx()
+            ax2.plot(env_rewards, linewidth=2, color='orange', label='Env Reward')
+            ax2.set_ylabel('Env Reward', fontsize=FS_LABEL)
+            ax2.tick_params(axis='y', labelcolor='orange')
+            
+        ax1.set_xlabel('Step', fontsize=FS_LABEL)
+        ax1.set_ylabel('Reward', fontsize=FS_LABEL)
+        ax1.set_title('Reward', fontsize=FS_TITLE, fontweight='bold')
+        ax1.grid(alpha=0.3)
+
+        handles, labels = ax1.get_legend_handles_labels()
+        if ax2 is not None:
+            handles2, labels2 = ax2.get_legend_handles_labels()
+            handles += handles2
+            labels += labels2
+            
+        ax1.legend(handles, labels, fontsize=FS_LEGEND)
         
         plt.tight_layout()
         plt.savefig(plot_path, dpi=300, bbox_inches='tight')
@@ -259,12 +277,12 @@ def _run_episode(model, env, video_path=None, save_video=True, save_rgb=False):
     episode_reward = 0.0
     step_rewards = []
     frames = []
-    subgoal_idxs = []
     actions = []
     observations = []
     rewards = []
-    env_rewards = []
-    detected_subgoald_idxs = []
+    subgoal_idxs = None
+    env_rewards = None
+    detected_subgoal_idxs = None
     
     while not done:
         action, _ = model.predict(obs, deterministic=DETERMINISTIC)
@@ -285,16 +303,22 @@ def _run_episode(model, env, video_path=None, save_video=True, save_rgb=False):
         done = terminated or truncated
 
         curr_subgoal = info.get("subgoal", None)
+        if curr_subgoal is not None and subgoal_idxs is None:
+            subgoal_idxs = []
         if curr_subgoal is not None and curr_subgoal > len(subgoal_idxs):
             subgoal_idxs.append(step_count)
             
         env_reward = info.get("env_reward", None)
+        if env_reward is not None and env_rewards is None:
+            env_rewards = []
         if env_reward is not None:
             env_rewards.append(float(env_reward))
             
         detected_subgoal = info.get("detected_subgoal", None)
-        if detected_subgoal is not None and detected_subgoal > len(detected_subgoald_idxs):
-            detected_subgoald_idxs.append(step_count)
+        if detected_subgoal is not None and detected_subgoal_idxs is None:
+            detected_subgoal_idxs = []
+        if detected_subgoal is not None and detected_subgoal > len(detected_subgoal_idxs):
+            detected_subgoal_idxs.append(step_count)
         
         # Render frame for both video and optional observation storage
         if save_video or save_rgb:
@@ -312,11 +336,7 @@ def _run_episode(model, env, video_path=None, save_video=True, save_rgb=False):
     if video_path and frames:
         _save_video(video_path, frames)
         
-    subgoal_idxs = subgoal_idxs if len(subgoal_idxs) > 0 else None
-    env_rewards = env_rewards if len(env_rewards) > 0 else None
-    detected_subgoald_idxs = detected_subgoald_idxs if len(detected_subgoald_idxs) > 0 else None
-    
-    return episode_reward, step_count, len(frames), step_rewards, subgoal_idxs, actions, observations, rewards, env_rewards, detected_subgoald_idxs
+    return episode_reward, step_count, len(frames), step_rewards, subgoal_idxs, actions, observations, rewards, env_rewards, detected_subgoal_idxs
 
 
 def _create_plots(results, output_dir):
@@ -374,6 +394,8 @@ def main():
                         help="Save RGB observations to H5 file for dataset creation")
     parser.add_argument("--no_progress_bar", action="store_true", default=False,
                         help="Disable progress bar")
+    parser.add_argument("--learned_reward_model_path", type=str, default=None,
+                        help="Path to the learned reward model checkpoint (if using a learned reward wrapper) - overrides config path if specified")
     parser.add_argument("--device", type=str, default="cpu",
                         help="Device to use (e.g., 'cpu', 'cuda:0'), NOTE: GPU does not support rendering, so videos saving is compromised when using GPU")
     
@@ -420,7 +442,19 @@ def main():
     
     # Convert dict to namespace with nested support
     config = _dict_to_namespace(config_dict)
-
+    
+    # load learned reward model if specified and needed for reward wrapper
+    if config.reward_wrapper.type not in ["sparse", "env", "env_state-intrinsic"]:
+        logging.info(f"Getting learned reward model for reward wrapper type {config.reward_wrapper.type}...")
+        if args.learned_reward_model_path is not None:
+            logging.info(f"Loading learned reward model from {args.learned_reward_model_path}...")
+            learned_reward_data = utils.load_learned_reward_data(args.learned_reward_model_path, device=device)
+        else:
+            logging.info(f"Getting learned reward model path from config {config.reward_wrapper.pretrained_path}")
+            learned_reward_data = utils.load_learned_reward_data(config.reward_wrapper.pretrained_path, device=device)
+    else:
+        learned_reward_data = None
+        
     # Create evaluation environment
     logging.info(f"Creating environment: {config.env_name}")
     eval_env = utils.make_env(
@@ -429,10 +463,11 @@ def main():
         reward_type=config.reward_wrapper.type,
         action_repeat=config.action_repeat,
         frame_stack=config.frame_stack,
+        learned_reward_data=learned_reward_data,
     )
     
     # Patch render compatibility in the wrapper chain
-    eval_env = patch_env_render_compatibility(eval_env)
+    #eval_env = patch_env_render_compatibility(eval_env)
 
     # Load model
     logging.info(f"Loading checkpoint from {checkpoint_dir}...")
@@ -464,15 +499,16 @@ def main():
             
         eval_env.unwrapped.set_seed(args.seed + episode_num)
         
-        episode_reward, episode_length, frame_count, step_rewards, subgoal_idxs, actions, observations, ep_rewards, env_rewards, detected_subgoal_idxs = _run_episode(
+        episode_reward, episode_length, frame_count, step_rewards, subgoal_idxs, actions, observations, ep_rewards, ep_env_rewards, detected_subgoal_idxs = _run_episode(
             model, eval_env, video_path, save_video=args.save_viz, save_rgb=args.save_rgb
         )
         rewards.append(episode_reward)
         lengths.append(episode_length)
         frame_counts.append(frame_count)
         subgoal_idxs_all.append(subgoal_idxs)
-        env_rewards.append(env_rewards)
+        env_rewards.append(ep_env_rewards)
         detected_subgoal_idxs_all.append(detected_subgoal_idxs)
+        
         
         # Store trajectory data for H5 saving
         episodes_data.append({
@@ -487,9 +523,12 @@ def main():
         # Save reward curve plot
         if args.save_viz and traj_dir:
             plot_path = os.path.join(traj_dir, f"{episode_num}.png")
-            _save_reward_plot(plot_path, step_rewards, subgoal_idxs)
+            _save_reward_plot(plot_path, step_rewards, subgoal_idxs, ep_env_rewards, detected_subgoal_idxs)
         
-        logging.info(f"Episode {episode_num}: reward={episode_reward:.4f}, length={episode_length}, frames={frame_count}, subgoal={len(subgoal_idxs)}")
+        add_info = f", env_reward={np.sum(ep_env_rewards):.2f}" if ep_env_rewards is not None else ""
+        add_info += f", subgoal={len(subgoal_idxs)}" if subgoal_idxs is not None else ""
+        add_info += f", detected_subgoal={len(detected_subgoal_idxs)}" if detected_subgoal_idxs is not None else ""
+        logging.info(f"Episode {episode_num}: reward={episode_reward:.2f}, length={episode_length}, frames={frame_count}{add_info}")
 
     # Compute statistics
     mean_reward = float(np.mean(rewards))

@@ -548,7 +548,7 @@ class SubgoalDistanceLearnedVisualRewardWrapper(LearnedVisualRewardWrapper):
         
         self.curr_detected_subgoal = 0
         
-        print(f"Initialized SubgoalDistanceLearnedVisualRewardWrapper with goal_emb shape {self.goal_emb.shape},"
+        print(f"Initialized SubgoalDistanceLearnedVisualRewardWrapper with goal_emb shape {self.goal_emb.shape}, "
               f"{len(self.subgoal_embs)} subgoal embeddings, distance_scale {dist_scale}, and subgoal_info {subgoal_info}")
         
     def _update_detected_subgoal(self, emb):
@@ -573,6 +573,10 @@ class SubgoalDistanceLearnedVisualRewardWrapper(LearnedVisualRewardWrapper):
         dist = self._curr_subgoal_to_goal_emb_distance(emb)
         rew = - dist * self.dist_scale + self.c_value * self.curr_detected_subgoal
         return rew
+    
+    def reset(self, *args, **kwargs):
+        self.curr_detected_subgoal = 0
+        return super().reset(*args, **kwargs)
         
     def step(self, action):
         obs, reward, terminated, truncated, info = super().step(action)
