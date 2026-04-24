@@ -454,7 +454,7 @@ class BaseAlgorithm(ABC):
             if maybe_ep_info is not None:
                 
                 maybe_ep_info["subgoal"] = info.get("subgoal", None)
-                maybe_ep_info["env_reward"] = info.get("env_reward", None)
+                maybe_ep_info["cum_env_reward"] = info.get("cum_env_reward", None)
                 maybe_ep_info["detected_subgoal"] = info.get("detected_subgoal", None)
                 
                 self.ep_info_buffer.extend([maybe_ep_info])

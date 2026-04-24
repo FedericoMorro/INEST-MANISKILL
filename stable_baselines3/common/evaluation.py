@@ -143,7 +143,7 @@ def evaluate_policy(
                             if return_episode_subgoals:
                                 episodes_subgoals.append(info.get("subgoal", 0))
                             if return_env_reward:
-                                episode_env_rewards.append(info.get("env_reward", 0))
+                                episode_env_rewards.append(info.get("cum_env_reward", 0))
                             if return_detected_subgoals:
                                 episodes_detected_subgoals.append(info.get("detected_subgoal", 0))
                                 
@@ -155,7 +155,7 @@ def evaluate_policy(
                         if return_episode_subgoals:
                             episodes_subgoals.append(info.get("subgoal", 0))
                         if return_env_reward:
-                            episode_env_rewards.append(info.get("env_reward", 0))
+                            episode_env_rewards.append(info.get("cum_env_reward", 0))
                         if return_detected_subgoals:
                             episodes_detected_subgoals.append(info.get("detected_subgoal", 0))
 

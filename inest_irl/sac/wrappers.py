@@ -484,9 +484,16 @@ class LearnedVisualRewardWrapper(RewardWrapper):
     @abc.abstractmethod
     def _get_reward_from_image(self, image):
         """Forward the pixels through the model and compute the reward."""
+        
+    def reset(self, *args, **kwargs):
+        self.cum_env_reward = 0.0
+        return super().reset(*args, **kwargs)
 
     def step(self, action):
         obs, reward, terminated, truncated, info = super().step(action)
+        
+        self.cum_env_reward += reward
+        info["cum_env_reward"] = self.cum_env_reward
         
         pixels = self._render_obs()
         learned_reward = self._get_reward_from_image(pixels)

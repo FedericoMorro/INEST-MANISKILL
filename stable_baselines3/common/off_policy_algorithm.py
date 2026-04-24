@@ -438,7 +438,7 @@ class OffPolicyAlgorithm(BaseAlgorithm):
         if len(self.ep_success_buffer) > 0:
             self.logger.record("rollout/success_rate", safe_mean(self.ep_success_buffer))
             
-        # add subgoal logs, env_reward logs, and detected_subgoal logs to be taken and logged to wandb
+        # add subgoal logs, cum_env_reward logs, and detected_subgoal logs to be taken and logged to wandb
         if len(self.ep_info_buffer) > 0:
             self.ep_add_info_buffer = {}
             
@@ -447,9 +447,9 @@ class OffPolicyAlgorithm(BaseAlgorithm):
                 max_subgoal = self.env.get_attr("max_subgoal", 0)[0]
                 self.ep_add_info_buffer["subgoal"] = subgoals_list_to_perc_dict(episodes_subgoals, max_subgoal, len(episodes_subgoals))
             
-            if "env_reward" in self.ep_info_buffer[0] and self.ep_info_buffer[0]["env_reward"] is not None:
-                episode_env_rewards = [ep_info["env_reward"] for ep_info in self.ep_info_buffer]
-                self.ep_add_info_buffer["env_reward"] = episode_env_rewards
+            if "cum_env_reward" in self.ep_info_buffer[0] and self.ep_info_buffer[0]["cum_env_reward"] is not None:
+                episode_env_rewards = [ep_info["cum_env_reward"] for ep_info in self.ep_info_buffer]
+                self.ep_add_info_buffer["cum_env_reward"] = episode_env_rewards
                 
             if "detected_subgoal" in self.ep_info_buffer[0] and self.ep_info_buffer[0]["detected_subgoal"] is not None:
                 episodes_detected_subgoals = [ep_info["detected_subgoal"] for ep_info in self.ep_info_buffer]
