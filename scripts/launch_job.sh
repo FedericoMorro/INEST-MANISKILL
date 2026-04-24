@@ -37,7 +37,7 @@ manage_existing_exp_folder() {
 if [[ "$1" == "inest" ]]; then
     echo "Submitting INEST MANISKILL RL training job..."
 
-    export REWARD_WRAPPER_TYPE="goal_dist"
+    export REWARD_WRAPPER_TYPE="subgoal_dist"
     export REWARD_SCALING="2.0"
     export ENV_RANDOMIZATION="True"
     export REPLAY_BUFFER_CAPACITY="1_000_000"

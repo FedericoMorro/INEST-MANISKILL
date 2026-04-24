@@ -280,9 +280,6 @@ def make_env(
   if frame_stack > 1:
     env = wrappers.FrameStack(env, frame_stack)
     
-  if reward_scaling != 1.0:
-    env = wrappers.RewardScale(env, reward_scaling)
-
   if not wrap:
     return env
 
@@ -294,6 +291,9 @@ def make_env(
     exp_dir,
     learned_reward_data,
   )
+  
+  if reward_scaling != 1.0:
+    env = wrappers.RewardScale(wrapped_env, reward_scaling)
 
   # Seed.
 #   env.seed(seed)
