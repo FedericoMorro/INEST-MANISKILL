@@ -266,7 +266,7 @@ class EvalSaveCallback(BaseCallback):
         return True
 
 
-def _make_env_wrapper(config, seed, rank, train_flag, device, exp_dir):
+def _make_env_wrapper(config, seed, rank, train_flag, learned_reward_data, exp_dir):
     """Factory function for creating environments in subprocesses."""
     return utils.make_env(
         env_name=config.env_name,
@@ -280,8 +280,7 @@ def _make_env_wrapper(config, seed, rank, train_flag, device, exp_dir):
         rank=rank,
         train_flag=train_flag,
         exp_dir=exp_dir,
-        learned_reward_pretrained_path=config.reward_wrapper.pretrained_path,
-        device=device,
+        learned_reward_data=learned_reward_data,
         add_episode_monitor = True,
         save_video=False,
     )
@@ -341,17 +340,25 @@ def main(_):
         wandb.run.log_code(".")
 
     # Copying flags to local variables to avoid issues with VecEnv subprocesses creation
-    config_copy = copy.deepcopy(config)
     base_seed = copy.deepcopy(FLAGS.seed)
 
     # Load environments
     logging.info(f"Creating {config.num_envs} environment(s)...")
     
+    # Populate learned_reward_data if using learned reward wrappers
+    learned_reward_data = None
+    if config.reward_wrapper.type not in ["sparse", "env", "env_state-intrinsic"]:
+        logging.info("Loading learned reward model and data...")
+        if config.reward_wrapper.pretrained_path is None:
+            raise ValueError(f"config.reward_wrapper.pretrained_path must be provided for learned reward wrapper types (specified: {config.reward_wrapper.type}).")
+        learned_reward_data = utils.load_learned_reward_data(config.reward_wrapper.pretrained_path, device)
+        logging.info("Learned reward data loaded successfully.")
+    
     # Create environment function for vec_env
     if config.num_envs > 1:
         # Multiple parallel environments - pass factory function with partial args
         env_fns = [
-            functools.partial(_make_env_wrapper, config, base_seed, rank=i, train_flag=True, device=device, exp_dir=exp_dir)
+            functools.partial(_make_env_wrapper, config, base_seed, rank=i, train_flag=True, learned_reward_data=learned_reward_data, exp_dir=exp_dir)
             for i in range(config.num_envs)
         ]
         env = SubprocVecEnv(env_fns)
@@ -359,12 +366,12 @@ def main(_):
         env = VecMonitor(env, os.path.join(exp_dir, "train_monitor"))
     else:
         # Single environment
-        env = _make_env_wrapper(config, base_seed, rank=0, train_flag=True, device=device, exp_dir=exp_dir)
+        env = _make_env_wrapper(config, base_seed, rank=0, train_flag=True, learned_reward_data=learned_reward_data, exp_dir=exp_dir)
         # Wrap with Monitor for episode statistics
         env = Monitor(env, os.path.join(exp_dir, "train_monitor"))
     
     # Create evaluation environment (with different seed)
-    base_eval_env = _make_env_wrapper(config, base_seed + 1000, rank=0, train_flag=False, device=device, exp_dir=exp_dir)
+    base_eval_env = _make_env_wrapper(config, base_seed + 1000, rank=0, train_flag=False, learned_reward_data=learned_reward_data, exp_dir=exp_dir)
     eval_env = Monitor(base_eval_env, os.path.join(exp_dir, "eval_monitor"))
 
     # Get observation and action space dimensions

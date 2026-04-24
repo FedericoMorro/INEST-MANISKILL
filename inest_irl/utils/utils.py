@@ -220,8 +220,7 @@ def make_env(
   rank = 0,
   train_flag = False,
   exp_dir = None,
-  learned_reward_pretrained_path = None,
-  device = None,
+  learned_reward_data = None,
   add_episode_monitor = True,
   save_video = False,
   wrap=True,
@@ -293,8 +292,7 @@ def make_env(
     rank,
     train_flag,
     exp_dir,
-    learned_reward_pretrained_path,
-    device,
+    learned_reward_data,
   )
 
   # Seed.
@@ -306,62 +304,44 @@ def make_env(
   return wrapped_env
 
 
-def wrap_env(env, reward_type, rank, train_flag, exp_dir, learned_reward_pretrained_path, device):
+def wrap_env(env, reward_type, rank, train_flag, exp_dir, learned_reward_data):
   """Wrap the environment with a learned reward wrapper.
 
   Args:
     env: A `gym.Env` to wrap with a `LearnedVisualRewardWrapper` wrapper.
     env_reward_type: The type of reward wrapper to use.
-    learned_reward_pretrained_path: The path to the pretrained reward model.
+    learned_reward_data: The pretrained reward model data.
     device: The device to use for the reward model. 
 
   Returns:
     gym.Env object.
   """
   print("Wrapping environment...")
+  
+  # environment reward wrappers
   if reward_type in ["env", "sparse"]:
     return wrappers.EnvironmentRewardWrapper(env, rank, train_flag, exp_dir)
   elif reward_type == "env_state-intrinsic":
     return wrappers.EnvironmentRewardStateIntrinsicWrapper(env, rank, train_flag, exp_dir)
   
-  if learned_reward_pretrained_path is None:
-    raise ValueError(f"learned_reward_pretrained_path must be provided for learned reward wrapper types (specified: {reward_type}).")
-
-  pretrained_path = learned_reward_pretrained_path
-  model, model_config, model_step = load_model_checkpoint(pretrained_path, device)
-  
-  cache_path = os.path.join(pretrained_path, "checkpoints", f"cached_embeddings_step_{model_step}.pkl")
-  if os.path.exists(cache_path):
-    print(f"Loading precomputed goal embedding from {cache_path}")
-    with open(cache_path, "rb") as fp:
-      goal_emb, subgoal_embs, dist_scale, subgoal_info = pickle.load(fp)
-  else:
-    print("No precomputed goal embedding found, computing now...")
-    from inest_irl.utils.compute_learned_return import compute_goal_embedding
-    train_loader = common.get_downstream_dataloaders(model_config)["train"]
-    subgoal_frames_path = Path(model_config.data.root) / "subgoal_frames.json"
-    if subgoal_frames_path.exists():
-      with open(subgoal_frames_path, 'r') as f:
-        subgoal_frames = json.load(f)
-      print(f"Found subgoal frames file with {len(subgoal_frames)} trajectories - will compute and plot subgoal rewards")
-    else:
-      subgoal_frames = None
-      print("No subgoal frames file found - will only compute and plot rewards to final goal")
-    goal_emb, subgoal_embs, dist_scale, subgoal_info = compute_goal_embedding(model, train_loader, device, subgoal_frames=subgoal_frames)
-    with open(cache_path, "wb") as fp:
-      pickle.dump((goal_emb, subgoal_embs, dist_scale, subgoal_info), fp)
-    print(f"Computed and cached goal embedding at {cache_path}")
+  # goal distance learned reward wrappers
+  model = learned_reward_data["model"]
+  device = learned_reward_data["device"]
+  goal_emb = learned_reward_data["goal_emb"]
+  dist_scale = learned_reward_data["dist_scale"]
     
-  print(subgoal_embs)
-  print(subgoal_info)
-  
   if reward_type == "goal_dist":
     return wrappers.GoalDistanceLearnedVisualRewardWrapper(
       env=env, rank=rank, train_flag=train_flag, exp_dir=exp_dir,
       model=model, device=device, #res_hw=model_config.data_augmentation.image_size,  -> should be already 128x128
       goal_emb=goal_emb, dist_scale=dist_scale,
     )
-  elif reward_type == "subgoal_dist":
+    
+  # subgoal distance learned reward wrappers
+  subgoal_embs = learned_reward_data["subgoal_embs"]
+  subgoal_info = learned_reward_data["subgoal_info"]
+    
+  if reward_type == "subgoal_dist":
     return wrappers.SubgoalDistanceLearnedVisualRewardWrapper(
       env=env, rank=rank, train_flag=train_flag, exp_dir=exp_dir,
       model=model, device=device, #res_hw=model_config.data_augmentation.image_size,  -> should be already 128x128
@@ -369,6 +349,7 @@ def wrap_env(env, reward_type, rank, train_flag, exp_dir, learned_reward_pretrai
     )
   else:
      raise NotImplementedError(f"Reward wrapper type {reward_type} not implemented yet.")
+  
   
   if reward_type == "reds":
     print("Model loaded")
@@ -429,3 +410,37 @@ def wrap_env(env, reward_type, rank, train_flag, exp_dir, learned_reward_pretrai
 
   return env
 
+
+def load_learned_reward_data(pretrained_path, device):
+  model, model_config, model_step = load_model_checkpoint(pretrained_path, device)
+  
+  cache_path = os.path.join(pretrained_path, "checkpoints", f"cached_embeddings_step_{model_step}.pkl")
+  if os.path.exists(cache_path):
+    print(f"Loading precomputed goal embedding from {cache_path}")
+    with open(cache_path, "rb") as fp:
+      goal_emb, subgoal_embs, dist_scale, subgoal_info = pickle.load(fp)
+  else:
+    print("No precomputed goal embedding found, computing now...")
+    from inest_irl.utils.compute_learned_return import compute_goal_embedding
+    train_loader = common.get_downstream_dataloaders(model_config)["train"]
+    subgoal_frames_path = Path(model_config.data.root) / "subgoal_frames.json"
+    if subgoal_frames_path.exists():
+      with open(subgoal_frames_path, 'r') as f:
+        subgoal_frames = json.load(f)
+      print(f"Found subgoal frames file with {len(subgoal_frames)} trajectories - will compute and plot subgoal rewards")
+    else:
+      subgoal_frames = None
+      print("No subgoal frames file found - will only compute and plot rewards to final goal")
+    goal_emb, subgoal_embs, dist_scale, subgoal_info = compute_goal_embedding(model, train_loader, device, subgoal_frames=subgoal_frames)
+    with open(cache_path, "wb") as fp:
+      pickle.dump((goal_emb, subgoal_embs, dist_scale, subgoal_info), fp)
+    print(f"Computed and cached goal embedding at {cache_path}")
+    
+  return {
+    "model": model,
+    "device": device,
+    "goal_emb": goal_emb,
+    "dist_scale": dist_scale,
+    "subgoal_embs": subgoal_embs,
+    "subgoal_info": subgoal_info,
+  }
