@@ -114,6 +114,12 @@ def compute_goal_embedding(model, train_loader, subgoal_frames, device):
 
       if subgoal_frames is not None:
         traj_id = batch["video_name"][0].split('/')[-1]  # video name should be in format .../../video_id
+        
+        # skip if trajectory ID not in subgoal_frames (data mismatch)
+        if traj_id not in subgoal_frames:
+          print(f"Warning: Trajectory ID {traj_id} not found in subgoal frames data - skipping subgoal embedding for this trajectory")
+          continue
+        
         subgoal_idxs = subgoal_frames[traj_id]
 
         # if empty list, add empty lists inside with the length of the number of subgoals
@@ -123,6 +129,9 @@ def compute_goal_embedding(model, train_loader, subgoal_frames, device):
 
         # add subgoal embeddings to the corresponding subgoal index list
         for i, idx in enumerate(subgoal_idxs):
+          if idx >= emb.shape[0]:  # sanity check for subgoal index out of bounds
+            print(f"Warning: Subgoal index {idx} for trajectory {traj_id} is out of bounds (trajectory length {emb.shape[0]}) - skipping this subgoal")
+            continue
           subgoal_embs_list[i].append(emb[idx, :])  # subgoal frame embedding
   
   # compute mean goal embedding and distance scale
@@ -141,7 +150,7 @@ def compute_goal_embedding(model, train_loader, subgoal_frames, device):
   # add subgoal info for pickling, used by wrapper in rl training
   subgoal_info = {
     "c_value": 0.25,
-    "distance_thresholds": [3.1, 10.0, 6.4, 8.2], #[3.0, 3.0, 3.0, 3.0],
+    "distance_thresholds": [3.0, 3.7, 3.0, 3.5],
     "patience_threshold": 0,
   }
   

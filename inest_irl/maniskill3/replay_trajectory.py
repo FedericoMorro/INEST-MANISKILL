@@ -458,10 +458,14 @@ def replay_cpu_sim(
             if success or args.allow_failure:
                 successful_replays += 1
                 if args.save_traj:
+                    #start_ptr = env._trajectory_buffer.env_episode_ptr[0]
+                    #end_ptr = len(env._trajectory_buffer.done)
                     env.flush_trajectory()
                 if args.save_video:
                     env.flush_video(ignore_empty_transition=False)
                 if subtask_enabled:
+                    #subgoal_frames = [frame - start_ptr for frame in subgoal_frames]
+                    #subgoal_frames = [min(frame, end_ptr - 1) for frame in subgoal_frames]
                     subtask_data[episode_id] = subgoal_frames
                 break
             else:
@@ -490,7 +494,7 @@ def _make_env(env_id, **kwargs):
     if "StackPyramid-v1" in env_id:
         import stack_pyramid as local_stack_pyramid
 
-        return local_stack_pyramid.StackPyramidEnv(env_reward_type="normalized_dense", **kwargs)
+        return local_stack_pyramid.StackPyramidEnv(env_reward_type="normalized_dense", enforce_full_episodes=False, **kwargs)
     return gym.make(env_id, **kwargs)
 
 

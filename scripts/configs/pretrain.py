@@ -218,7 +218,7 @@ def get_config():
   # ============================================== #
   config.optim = ml_collections.ConfigDict()
 
-  config.optim.train_max_iters = 20_000
+  config.optim.train_max_iters = 10_000
   # L2 regularization.
   config.optim.weight_decay = 1e-4
   # Learning rate.

@@ -263,6 +263,8 @@ def _run_episode(model, env, video_path=None, save_video=True, save_rgb=False):
     actions = []
     observations = []
     rewards = []
+    env_rewards = []
+    detected_subgoald_idxs = []
     
     while not done:
         action, _ = model.predict(obs, deterministic=DETERMINISTIC)
@@ -285,6 +287,14 @@ def _run_episode(model, env, video_path=None, save_video=True, save_rgb=False):
         curr_subgoal = info.get("subgoal", None)
         if curr_subgoal is not None and curr_subgoal > len(subgoal_idxs):
             subgoal_idxs.append(step_count)
+            
+        env_reward = info.get("env_reward", None)
+        if env_reward is not None:
+            env_rewards.append(float(env_reward))
+            
+        detected_subgoal = info.get("detected_subgoal", None)
+        if detected_subgoal is not None and detected_subgoal > len(detected_subgoald_idxs):
+            detected_subgoald_idxs.append(step_count)
         
         # Render frame for both video and optional observation storage
         if save_video or save_rgb:
@@ -301,8 +311,12 @@ def _run_episode(model, env, video_path=None, save_video=True, save_rgb=False):
     # Save video if frames were collected
     if video_path and frames:
         _save_video(video_path, frames)
+        
+    subgoal_idxs = subgoal_idxs if len(subgoal_idxs) > 0 else None
+    env_rewards = env_rewards if len(env_rewards) > 0 else None
+    detected_subgoald_idxs = detected_subgoald_idxs if len(detected_subgoald_idxs) > 0 else None
     
-    return episode_reward, step_count, len(frames), step_rewards, subgoal_idxs, actions, observations, rewards
+    return episode_reward, step_count, len(frames), step_rewards, subgoal_idxs, actions, observations, rewards, env_rewards, detected_subgoald_idxs
 
 
 def _create_plots(results, output_dir):
@@ -439,6 +453,8 @@ def main():
     lengths = []
     frame_counts = []
     subgoal_idxs_all = []
+    env_rewards = []
+    detected_subgoal_idxs_all = []
     episodes_data = []
         
     for episode_num in tqdm(range(args.num_episodes), desc="Evaluating", unit="episode", disable=args.no_progress_bar):
@@ -448,13 +464,15 @@ def main():
             
         eval_env.unwrapped.set_seed(args.seed + episode_num)
         
-        episode_reward, episode_length, frame_count, step_rewards, subgoal_idxs, actions, observations, ep_rewards = _run_episode(
+        episode_reward, episode_length, frame_count, step_rewards, subgoal_idxs, actions, observations, ep_rewards, env_rewards, detected_subgoal_idxs = _run_episode(
             model, eval_env, video_path, save_video=args.save_viz, save_rgb=args.save_rgb
         )
         rewards.append(episode_reward)
         lengths.append(episode_length)
         frame_counts.append(frame_count)
         subgoal_idxs_all.append(subgoal_idxs)
+        env_rewards.append(env_rewards)
+        detected_subgoal_idxs_all.append(detected_subgoal_idxs)
         
         # Store trajectory data for H5 saving
         episodes_data.append({
@@ -478,19 +496,35 @@ def main():
     std_reward = float(np.std(rewards))
     mean_length = float(np.mean(lengths))
     std_length = float(np.std(lengths))
+    mean_env_reward = float(np.mean(env_rewards)) if env_rewards else 0.0
+    std_env_reward = float(np.std(env_rewards)) if env_rewards else 0.0
     
     # Convert subgoal indices to dict of reach rates
-    max_subgoal = eval_env.unwrapped.max_subgoal
-    episode_subgoals_dict = {i: 0 for i in range(max_subgoal + 1)}
-    for subgoal_idxs in subgoal_idxs_all:
-        # interpret first as failure rate, then cumulative reach rates for each subgoal
-        subgoal_reached = len(subgoal_idxs)
-        if subgoal_reached == 0:
-            episode_subgoals_dict[0] += 1
-        else:
-            for idx in range(1, subgoal_reached + 1):
-                episode_subgoals_dict[idx] += 1
-    episode_subgoals_dict = {k: v / args.num_episodes for k, v in episode_subgoals_dict.items()}
+    episode_subgoals_dict = {}
+    if subgoal_idxs_all:
+        max_subgoal = eval_env.unwrapped.max_subgoal
+        episode_subgoals_dict = {i: 0 for i in range(max_subgoal + 1)}
+        for subgoal_idxs in subgoal_idxs_all:
+            # interpret first as failure rate, then cumulative reach rates for each subgoal
+            subgoal_reached = len(subgoal_idxs)
+            if subgoal_reached == 0:
+                episode_subgoals_dict[0] += 1
+            else:
+                for idx in range(1, subgoal_reached + 1):
+                    episode_subgoals_dict[idx] += 1
+        episode_subgoals_dict = {k: v / args.num_episodes for k, v in episode_subgoals_dict.items()}
+    
+    detected_subgoals_dict = {}
+    if detected_subgoal_idxs_all:
+        detected_subgoals_dict = {i: 0 for i in range(max_subgoal + 1)}
+        for subgoal_idxs in detected_subgoal_idxs_all:
+            subgoal_reached = len(subgoal_idxs)
+            if subgoal_reached == 0:
+                detected_subgoals_dict[0] += 1
+            else:
+                for idx in range(1, subgoal_reached + 1):
+                    detected_subgoals_dict[idx] += 1
+        detected_subgoals_dict = {k: v / args.num_episodes for k, v in detected_subgoals_dict.items()}
     
     success_rate = episode_subgoals_dict.get(max_subgoal, 0.0)
     avg_subgoal_reached = np.mean([len(idxs) for idxs in subgoal_idxs_all])
@@ -502,7 +536,26 @@ def main():
     logging.info(f"Mean Reward: {mean_reward:.4f} ± {std_reward:.4f}")
     logging.info(f"Min-Max Reward: {np.min(rewards):.4f} - {np.max(rewards):.4f}")
     logging.info(f"Success Rate: {success_rate:.4f}")
-    logging.info(f"Average Subgoals Reached: {avg_subgoal_reached:.2f} / {max_subgoal}")
+    
+    if episode_subgoals_dict:
+        logging.info(f"Average Subgoals Reached: {avg_subgoal_reached:.2f} / {max_subgoal}")
+        logging.info("Subgoal Reach Rates:")
+        for subgoal_idx in range(max_subgoal + 1):
+            reach_rate = episode_subgoals_dict.get(subgoal_idx, 0.0)
+            logging.info(f"  Subgoal {subgoal_idx}: {reach_rate:.4f}")
+        
+    if env_rewards:
+        logging.info(f"Mean Environment Reward: {mean_env_reward:.4f} ± {std_env_reward:.4f}")
+        logging.info(f"Min-Max Environment Reward: {np.min(env_rewards):.4f} - {np.max(env_rewards):.4f}")
+        
+    if detected_subgoals_dict:
+        avg_detected_subgoal_reached = np.mean([len(idxs) for idxs in detected_subgoal_idxs_all])
+        logging.info(f"Average Detected Subgoals Reached: {avg_detected_subgoal_reached:.2f} / {max_subgoal}")
+        logging.info("Detected Subgoal Reach Rates:")
+        for subgoal_idx in range(max_subgoal + 1):
+            reach_rate = detected_subgoals_dict.get(subgoal_idx, 0.0)
+            logging.info(f"  Subgoal {subgoal_idx}: {reach_rate:.4f}")
+            
     if traj_dir:
         logging.info(f"Trajectories saved to: {traj_dir}")
     logging.info("=" * 50)
@@ -521,7 +574,9 @@ def main():
         "individual_rewards": rewards,
         "episode_lengths": lengths,
         "frame_counts": frame_counts,
-        "subgoal_idxs": subgoal_idxs_all
+        "subgoal_idxs": subgoal_idxs_all,
+        "env_rewards": env_rewards,
+        "detected_subgoal_idxs": detected_subgoals_dict,
     }
     
     results_path = os.path.join(results_dir, "results.json")
