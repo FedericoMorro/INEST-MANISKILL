@@ -82,21 +82,32 @@ def setup_from_pretrain(experiment_path, use_cpu, diff_dataset_path=None):
   subgoal_frames_path = Path(config.data.root) / "subgoal_frames.json"
   if subgoal_frames_path.exists():
     with open(subgoal_frames_path, 'r') as f:
-      subgoal_frames = json.load(f)
-    print(f"Found subgoal frames file with {len(subgoal_frames)} trajectories - will compute and plot subgoal rewards")
+      train_subgoal_frames = json.load(f)
+    print(f"Found subgoal frames file with {len(train_subgoal_frames)} trajectories - will compute and plot subgoal rewards")
   else:
-    subgoal_frames = None
+    train_subgoal_frames = None
     print("No subgoal frames file found - will only compute and plot rewards to final goal")
 
   # if a different trajectory dataset path is provided, load it instead of the validation set for evaluation
   if diff_dataset_path is not None:
     print(f"Loading different trajectory dataset from: {diff_dataset_path}")
     config.data.root = diff_dataset_path
+    
+    subgoal_frames_path = Path(config.data.root) / "subgoal_frames.json"
+    if subgoal_frames_path.exists():
+      with open(subgoal_frames_path, 'r') as f:
+        valid_subgoal_frames = json.load(f)
+      print(f"Found subgoal frames file for different trajectory dataset with {len(valid_subgoal_frames)} trajectories - will compute and plot subgoal rewards")
+    else:
+      valid_subgoal_frames = None
+      
   else:
     print("No different trajectory dataset provided - using validation set for evaluation")
+    valid_subgoal_frames = train_subgoal_frames
+    
   valid_loader = common.get_downstream_dataloaders(config, debug=use_cpu)["valid"]
   
-  return model, train_loader, valid_loader, subgoal_frames, global_step, device
+  return model, train_loader, valid_loader, train_subgoal_frames, valid_subgoal_frames, global_step, device
 
 
 def compute_goal_embedding(model, train_loader, subgoal_frames, device):
@@ -181,12 +192,18 @@ def compute_reward_signals(model, valid_loader, goal_emb, subgoal_embs, dist_sca
 
       # compute subgoal rewards if subgoal embeddings are provided
       if subgoal_embs is not None:
-        # Get ground truth subgoal indices from data if available
+        
+        # get ground truth subgoal indices from data, or from subgoal frames if available
         subogal_reachs_gt_path = Path(f"{batch['video_name'][0]}/{traj_id}_subgoal_idxs.json")
         if subogal_reachs_gt_path.exists():
           with open(subogal_reachs_gt_path, 'r') as f:
             gt_subgoal_idxs = json.load(f)
-            
+        elif subgoal_frames is not None and traj_id in subgoal_frames:
+          gt_subgoal_idxs = subgoal_frames[traj_id]
+        else:
+          gt_subgoal_idxs = None
+          
+        if gt_subgoal_idxs is not None:          
           if subgoal_reachs_gt is None:
             subgoal_reachs_gt = [ [] for _ in range(len(subgoal_embs)) ]
           for i, idx in enumerate(gt_subgoal_idxs):
@@ -520,7 +537,7 @@ def main(args):
 
   # setup model and data
   print(f"Loading model from: {args.experiment_path}")
-  model, train_loader, valid_loader, subgoal_frames, global_step, device = setup_from_pretrain(
+  model, train_loader, valid_loader, train_subgoal_frames, valid_subgoal_frames, global_step, device = setup_from_pretrain(
     args.experiment_path, 
     args.use_cpu, 
     diff_dataset_path=args.diff_trajs_dataset
@@ -533,7 +550,7 @@ def main(args):
     print("No cached embedddings found (or overwrite flag is set) - computing from scratch...")
 
     # compute goal embedding
-    goal_emb, subgoal_embs, dist_scale, subgoal_info = compute_goal_embedding(model, train_loader, subgoal_frames, device)
+    goal_emb, subgoal_embs, dist_scale, subgoal_info = compute_goal_embedding(model, train_loader, train_subgoal_frames, device)
     print(f"Goal embedding computed - shape: {goal_emb.shape}")
     if subgoal_embs is not None:
       print(f"Subgoals identified: {len(subgoal_embs)} - shape: {subgoal_embs[0].shape}")
@@ -557,7 +574,7 @@ def main(args):
   
   # compute reward signals
   (rewards, traj_ids, subgoal_rewards, subgoal_dists, subgoal_reachs, subgoal_reachs_gt
-  ) = compute_reward_signals(model, valid_loader, goal_emb, subgoal_embs, dist_scale, device, subgoal_frames=subgoal_frames)
+  ) = compute_reward_signals(model, valid_loader, goal_emb, subgoal_embs, dist_scale, device, valid_subgoal_frames)
   print(f"Computed {len(rewards)} reward signals")
   if subgoal_reachs_gt is not None:
     print(f"Using ground truth subgoal indices for distance plots")
