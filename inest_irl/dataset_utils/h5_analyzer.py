@@ -425,7 +425,7 @@ if __name__ == "__main__":
 
         # save videos if requested
         if args.vis:
-            _save_demo_videos(f, demo_names, output_dir=args.output_path, subgoals_data=subgoals_path)
+            _save_demo_videos(f, demo_names, output_dir=args.output_path, subgoals_path=subgoals_path)
 
         # create output path for plots and stats
         dir_name = os.path.dirname(args.filepath).split("/")[-1]

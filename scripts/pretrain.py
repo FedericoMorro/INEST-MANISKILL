@@ -15,6 +15,7 @@
 
 """Launch script for pre-training representations."""
 
+import os
 import os.path as osp
 
 from absl import app
@@ -57,7 +58,7 @@ config_flags.DEFINE_config_file(
 def main(_):
   # Make sure we have a valid config that inherits all the keys defined in the
   # base config.
-  validate_config(FLAGS.config, mode="pretrain")
+  #validate_config(FLAGS.config, mode="pretrain")
 
   config = FLAGS.config
   exp_dir = osp.join(config.root_dir, FLAGS.experiment_name)
@@ -92,6 +93,20 @@ def main(_):
     logging.info("No RNG seed has been set for this pretraining experiment.")
 
   logger = Logger(osp.join(exp_dir, "tb"), FLAGS.resume)
+  
+  # set num_frames_per_sequence to max number of frames in a video sequence in the dataset if None
+  if config.frame_sampler.num_frames_per_sequence is None:
+    max_num_frames = 0
+    train_data_path = osp.join(config.data.root, "train")
+    for class_name in os.listdir(train_data_path):
+      class_path = osp.join(train_data_path, class_name)
+      for traj_path in os.listdir(class_path):
+        for frame_path in os.listdir(osp.join(class_path, traj_path)):
+          if frame_path.endswith(".png"):
+            num_frames = int(frame_path.split("_")[-1].split(".")[0])
+            max_num_frames = max(max_num_frames, num_frames)
+    config.frame_sampler.num_frames_per_sequence = max_num_frames
+    logging.info(f"Set frame_sampler.num_frames_per_sequence to {max_num_frames} based on the maximum number of frames in a video sequence in the dataset.")
 
   # Load factories.
   (

@@ -40,7 +40,6 @@ DataLoaderType = typing.Dict[str, torch.utils.data.DataLoader]
 
 C_VALUE = 0.25   # additional reward for reaching any subgoal
 DISTANCE_THRESHOLDS = [3, 3, 3, 3]  # distance threshold for considering a subgoal reached (in embedding space)
-#DISTANCE_THRESHOLDS = [3.1, 10.0, 6.4, 8.2]
 PATIENCE_THRESHOLD = 2  # number of consecutive timesteps below distance threshold to consider subgoal reached
 
 # report-friendly plotting defaults (compact figure size with readable text)
@@ -51,6 +50,16 @@ FS_LABEL = 12
 FS_TITLE = 13
 FS_LEGEND = 10
 FS_TRAJ_TITLE = 12
+
+#DISTANCE_THRESHOLDS = [3, 3, 3, 3]
+#   --experiment_path ../data/inest-maniskill/_experiments/pretrain/render-cam/
+
+#DISTANCE_THRESHOLDS = [3.1, 10.0, 6.4, 8.2]
+#   --experiment_path ../data/inest-maniskill/_experiments/pretrain/render-cam/ \
+#   --diff_trajs_dataset ../data/inest-maniskill/experiment_data-trajs/full_disc-0.9_4step_high*22*best_model/dataset
+
+#DISTANCE_THRESHOLDS = [3.0, 3.7, 3.0, 3.5]
+#   --experiment_path ../data/inest-maniskill/_experiments/pretrain/rc1000-b32/
 
 
 def setup_from_pretrain(experiment_path, use_cpu, diff_dataset_path=None):

@@ -41,7 +41,7 @@ Sample h5 file structure assumed:
 
 The structure of the dataset is as follows:
   dataset/
-    subgoal_frames.json               (if found in the same folder as the h5 file)
+    subgoal_frames.json               (if found in the same folder as the h5 file, or if subgoal present in extra obs)
     train/
     valid/
       name/                           (by default, name of obs_key)
@@ -152,6 +152,8 @@ def main(args):
   h5_file = h5py.File(args.h5_path, 'r')
   traj_names = list(h5_file.keys())
   print(f'Found {len(traj_names)} trajectories in the h5 file.')
+  
+  subgoal_data = {}
     
   for traj_name in tqdm(h5_file, desc='Processing trajectories'):
     traj_group = h5_file[traj_name]
@@ -166,8 +168,28 @@ def main(args):
 
     # handle trajectory data
     handle_traj(traj_group, traj_path, traj_idx, obs_key, action_keys, robot_state_keys, objects_state_keys)
+    
+    try:
+      subgoal_data[int(traj_idx)] = np.array(_access_nested_group(traj_group, 'obs/extra/subgoal')).tolist()
+    except KeyError:
+      pass
 
   h5_file.close()
+  
+  # if not empty convert from list of subgoals per trajectory to dict of subgoal frames per trajectory and save as json
+  if subgoal_data:
+    subgoal_idxs = {}
+    for traj_idx, subgoals in subgoal_data.items():
+      subgoal_idxs[traj_idx] = []
+      for t, subgoal in enumerate(subgoals):
+        if subgoal > len(subgoal_idxs[traj_idx]):
+          subgoal_idxs[traj_idx].append(t)
+          
+    subgoals_path = os.path.join(args.dataset_path, 'subgoal_frames.json')
+    with open(subgoals_path, 'w') as f:
+      json.dump(subgoal_idxs, f, indent=2)
+    print(f'Saved subgoal frames taken from extra obs to {subgoals_path}')
+    exit(0)
 
   # if find subgoal_frames.json file, copy it in the dataset folder
   subgoals_path = os.path.dirname(args.h5_path) + '/subgoal_frames.json'

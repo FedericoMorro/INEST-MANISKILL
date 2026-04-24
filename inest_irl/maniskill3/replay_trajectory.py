@@ -16,13 +16,13 @@ Example usage:
 python inest_irl/maniskill3/replay_trajectory.py
     --traj-path ../.maniskill/demos/StackPyramid-v1/motionplanning/trajectory.h5
     --save-traj
-    --obs-mode rgb
+    --obs-mode rgb+state_dict
     --output-path ../data/maniskill/StackPyramid-v1_.../
+    [--use-env-states]
     [--count 100]
     [--num-envs 10]
     [--cam-width 256]
     [--cam-height 256]
-    [--subtask-json]
 
     
 # to replay trajs with state_dict obses and get environmental rewards for analysis
@@ -35,7 +35,6 @@ python inest_irl/maniskill3/replay_trajectory.py
     --record-rewards
     [--count 100]
     [--num-envs 10]
-    [--subtask-json]
 
     
 # for negative trajs
@@ -46,7 +45,6 @@ python inest_irl/maniskill3/replay_trajectory.py
     --obs-mode rgb
     --output-path ../data/inest-maniskill/negative-trajs
     --allow-failure
-    [--subtask-json]
 """
 
 

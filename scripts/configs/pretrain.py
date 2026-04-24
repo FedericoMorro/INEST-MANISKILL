@@ -47,7 +47,7 @@ def get_config():
   #INITIAL DATASET
   #config.data.root = "/tmp/xirl/xirl_dataset/xmagical"
   #SUBTASK DATASET
-  config.data.root = "/data/fmorro/inest-maniskill/dataset-rc-1000"
+  config.data.root = "/data/fmorro/inest-maniskill/dataset-rc-1000-states"
   # Absolute path to the dataset root.
   # The mini-batch size. Note this only specifies the number of videos to
   # load frames from in a single batch. The effective batch size is actually
@@ -79,7 +79,8 @@ def get_config():
   # This controls the type of sampling we perform on video frames.
   config.frame_sampler.strategy = "uniform"
   # The number of frames to sample per video.
-  config.frame_sampler.num_frames_per_sequence = 20 #20
+  config.frame_sampler.num_frames_per_sequence = None #20
+  #   if None, set to maximum number of frames in a video sequence in the dataset
   # The number of context frames to sample per frame. This is useful for
   # models that use 3D convolutions.
   config.frame_sampler.num_context_frames = 1

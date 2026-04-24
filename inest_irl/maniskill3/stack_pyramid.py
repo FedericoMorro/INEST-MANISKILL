@@ -131,7 +131,10 @@ class StackPyramidEnv(BaseEnv):
     def _initialize_episode(self, env_idx: torch.Tensor, options: dict):
         with torch.device(self.device):
             b = len(env_idx)
-            self.table_scene.initialize(env_idx)
+            
+            # init subgoal tracking at the beginning of the episode for env states setting replay
+            self.prev_cubeA_pos = self.cubeA.pose.p
+            self.curr_subgoal = 0
 
             if self.randomize_cubes:
                 # Randomized positions and rotations
@@ -351,6 +354,11 @@ class StackPyramidEnv(BaseEnv):
                 is_cubeB_grasped=self.agent.is_grasping(self.cubeB),
                 is_cubeC_grasped=self.agent.is_grasping(self.cubeC),
                 is_cubeC_static=self.cubeC.is_static(lin_thresh=1e-2, ang_thresh=0.5)
+            )
+            
+            self._update_subgoal_success()   
+            obs.update(
+                subgoal=self.curr_subgoal
             )
         return obs
 
