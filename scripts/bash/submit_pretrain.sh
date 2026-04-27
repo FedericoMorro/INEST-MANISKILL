@@ -7,6 +7,7 @@ echo " Dataset Path: $SCRATCH_FLASH_DATASET_PATH"
 echo " Random Seed: $RND_SEED"
 echo " Batch Size: $BATCH_SIZE"
 echo " Train Max Iters: $TRAIN_MAX_ITERS"
+echo " Num Frames per Sequence: $NUM_FRAMES_PER_SEQUENCE"
 echo "====================================="
 
 # Load necessary modules (adjust based on your cluster)
@@ -49,11 +50,11 @@ export TF_CPP_MIN_LOG_LEVEL=2
 
 # Additional performance optimizations
 export CUDA_CACHE_DISABLE=0
-export CUDA_CACHE_PATH=/tmp/cuda_cache
+export CUDA_CACHE_PATH=${HOME}/tmp/${SLURM_JOB_ID}/cuda_cache
 export TORCH_USE_CUDA_DSA=1
 
 # Fix checkpoint saving cross-device link issue
-export TMPDIR=${HOME}/data/tmp
+export TMPDIR=${HOME}/tmp/${SLURM_JOB_ID}
 mkdir -p $TMPDIR
 
 # Fix NFS multiprocessing issues
@@ -94,7 +95,8 @@ CMD="python /home/fmorro/INEST-MANISKILL/scripts/pretrain.py \
     --wandb \
     --config.data.root=${SCRATCH_FLASH_DATASET_PATH} \
     --config.data.batch_size=${BATCH_SIZE} \
-    --config.optim.train_max_iters=${TRAIN_MAX_ITERS}"
+    --config.optim.train_max_iters=${TRAIN_MAX_ITERS} \
+    --config.frame_sampler.num_frames_per_sequence=${NUM_FRAMES_PER_SEQUENCE}"
 
 # Execute the command
 echo "Executing: $CMD"

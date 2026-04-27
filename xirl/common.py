@@ -51,7 +51,7 @@ def get_pretraining_dataloaders(
         dataset,
         collate_fn=dataset.collate_fn,
         batch_sampler=batch_sampler,
-        num_workers=2 if torch.cuda.is_available() and not debug else 0,
+        num_workers=0,  # Avoid multiprocessing temp cleanup errors on NFS
         pin_memory=torch.cuda.is_available() and not debug,
     )
 
@@ -87,7 +87,7 @@ def get_downstream_dataloaders(
           dataset,
           collate_fn=dataset.collate_fn,
           batch_sampler=batch_sampler,
-          num_workers=2 if torch.cuda.is_available() and not debug else 0,
+          num_workers=0,  # Avoid multiprocessing temp cleanup errors on NFS
           pin_memory=torch.cuda.is_available() and not debug,
       )
     return loaders
