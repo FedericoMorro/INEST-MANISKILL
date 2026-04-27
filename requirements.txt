@@ -90,6 +90,7 @@ opencv-python==4.11.0.86
 opencv-python-headless==4.11.0.86
 opt-einsum==3.3.0
 optree==0.17.0
+optuna>=4.8.0
 packaging==25.0
 pandas==1.4.4
 parso==0.8.5

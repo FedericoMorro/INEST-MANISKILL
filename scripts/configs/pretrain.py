@@ -79,8 +79,8 @@ def get_config():
   # This controls the type of sampling we perform on video frames.
   config.frame_sampler.strategy = "uniform"
   # The number of frames to sample per video.
-  config.frame_sampler.num_frames_per_sequence = None #20
-  #   if None, set to maximum number of frames in a video sequence in the dataset
+  config.frame_sampler.num_frames_per_sequence = -1 #20
+  #   if < 0, set to maximum number of frames in a video sequence in the dataset
   # The number of context frames to sample per frame. This is useful for
   # models that use 3D convolutions.
   config.frame_sampler.num_context_frames = 1
@@ -220,6 +220,7 @@ def get_config():
   config.optim = ml_collections.ConfigDict()
 
   config.optim.train_max_iters = 10_000
+  #config.optim.num_epochs = 400
   # L2 regularization.
   config.optim.weight_decay = 1e-4
   # Learning rate.

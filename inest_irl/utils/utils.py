@@ -117,19 +117,19 @@ FrozenConfigDict = config_dict.FrozenConfigDict
 # ========================================= #
 
 
-def setup_experiment(exp_dir, config, resume = False):
+def setup_experiment(exp_dir, config, resume=False, overwrite=False):
   """Initializes a pretraining or RL experiment."""
   #  If the experiment directory doesn't exist yet, creates it and dumps the
   # config dict as a yaml file and git hash as a text file.
   # If it exists already, raises a ValueError to prevent overwriting
   # unless resume is set to True.
-  if os.path.exists(exp_dir):
+  if os.path.exists(exp_dir) and not overwrite:
     if not resume:
       raise ValueError(
           "Experiment already exists. Run with --resume to continue.")
     load_config_from_dir(exp_dir, config)
   else:
-    os.makedirs(exp_dir)
+    os.makedirs(exp_dir, exist_ok=overwrite)
     with open(os.path.join(exp_dir, "config.yaml"), "w") as fp:
       yaml.dump(ConfigDict.to_dict(config), fp)
     with open(os.path.join(exp_dir, "git_hash.txt"), "w") as fp:

@@ -34,6 +34,7 @@ import wandb
 
 from configs import validate_config
 from inest_irl.utils.utils import setup_experiment
+from inest_irl.utils.csv_logger import CSVLogger
 
 # pylint: disable=logging-fstring-interpolation
 
@@ -42,9 +43,11 @@ FLAGS = flags.FLAGS
 flags.DEFINE_string("experiment_name", None, "Experiment name.")
 flags.DEFINE_integer("seed", 22, "RNG seed for experiment. Set to `none` to disable seeding.")
 flags.DEFINE_boolean("resume", False, "Whether to resume training.")
+flags.DEFINE_boolean("overwrite", False, "Whether to overwrite existing experiment with the same name.")
 flags.DEFINE_string("device", "cuda:0", "The compute device.")
 flags.DEFINE_boolean("raw_imagenet", False, "")
 flags.DEFINE_boolean("wandb", False, "Log on W&B.")
+flags.DEFINE_string("wandb_project_name", "StackPyramidPretrain", "W&B project name.")
 flags.DEFINE_boolean("verbose", True, "Whether to print out training logs.")
 
 config_flags.DEFINE_config_file(
@@ -54,7 +57,7 @@ config_flags.DEFINE_config_file(
 )
 
 
-@experiment.pdb_fallback
+@app.run
 def main(_):
   # Make sure we have a valid config that inherits all the keys defined in the
   # base config.
@@ -62,7 +65,7 @@ def main(_):
 
   config = FLAGS.config
   exp_dir = osp.join(config.root_dir, FLAGS.experiment_name)
-  setup_experiment(exp_dir, config, FLAGS.resume)
+  setup_experiment(exp_dir, config, FLAGS.resume, FLAGS.overwrite)
 
   # No need to do any pretraining if we're loading the raw pretrained
   # ImageNet baseline.
@@ -70,7 +73,7 @@ def main(_):
     return
   
   if FLAGS.wandb:
-    wandb.init(project="StackPyramidPretrain", group="Pretrain", name=FLAGS.experiment_name, mode="online")
+    wandb.init(project=FLAGS.wandb_project_name, group="Pretrain", name=FLAGS.experiment_name, mode="online")
     wandb.config.update(FLAGS)
     wandb.run.log_code(".")
     wandb.config.update(config.to_dict(), allow_val_change=True)
@@ -93,9 +96,11 @@ def main(_):
     logging.info("No RNG seed has been set for this pretraining experiment.")
 
   logger = Logger(osp.join(exp_dir, "tb"), FLAGS.resume)
+  eval_logger = CSVLogger(osp.join(exp_dir, "eval_log.csv"))
+  eval_logger.init_logging(["epoch", "step", "loss", "kendalls_tau"])
   
   # set num_frames_per_sequence to max number of frames in a video sequence in the dataset if None
-  if config.frame_sampler.num_frames_per_sequence is None:
+  if config.frame_sampler.num_frames_per_sequence < 0:
     max_num_frames = 0
     train_data_path = osp.join(config.data.root, "train")
     for class_name in os.listdir(train_data_path):
@@ -157,6 +162,12 @@ def main(_):
             if FLAGS.wandb:
               wandb.log(data={f"pretrain_valid/{k}": v}, step=global_step)
 
+          eval_logger.log({
+              "epoch": epoch,
+              "step": global_step,
+              "loss": valid_loss["valid/total_loss"],
+          })
+              
           # Evaluate the model on the downstream datasets.
           for split, downstream_loader in downstream_loaders.items():
             eval_to_metric = eval_manager.evaluate(
@@ -176,6 +187,12 @@ def main(_):
                 eval_out.log_wandb(
                     wandb, global_step, eval_name, f"downstream_{split}"
                 )
+              if split == "valid" and eval_name == "kendalls_tau/scalar_mean":
+                eval_logger.log({
+                    "kendalls_tau": eval_out.value,
+                })
+          
+          eval_logger.flush()
               
         # Save model checkpoint.
         if not global_step % config.checkpointing_frequency:
@@ -252,6 +269,9 @@ def main(_):
               
         stopwatch.reset()
       epoch += 1
+      
+      #if epoch > config.optim.num_epochs:
+      #  complete = True
 
   except KeyboardInterrupt:
     logging.info("Caught keyboard interrupt. Saving model before quitting.")
