@@ -8,8 +8,8 @@ mkdir -p ${HOME}/logs
 
 if [ $# -ne 2 ]; then
     echo "Usage: $0 <script_name> <experiment_name>"
-    echo "Where: <script_name> in [pretrain, inest]"
-    echo "Example: $0 inest 32_no-rng_v##"
+    echo "Where: <script_name> in [rl, pretrain, opt-pretrain]"
+    echo "Example: $0 rl 32_no-rng_v##"
     exit 1
 fi
 
@@ -54,12 +54,12 @@ manage_existing_scratch_flash_folder() {
 }
 
 
-if [[ "$1" == "inest" ]]; then
+if [[ "$1" == "rl" ]]; then
     echo "Submitting INEST MANISKILL RL training job..."
 
-    export REWARD_WRAPPER_TYPE="goal_dist"
-    export REWARD_SCALING="2.0"
-    export ENV_RANDOMIZATION="True"
+    export REWARD_WRAPPER_TYPE="subgoal_dist"
+    export REWARD_SCALING="1.0"
+    export ENV_RANDOMIZATION="default"
     export REPLAY_BUFFER_CAPACITY="1_000_000"
     export ACTOR_LR="3e-4"
     export CRITIC_LR="1e-4"
@@ -68,7 +68,7 @@ if [[ "$1" == "inest" ]]; then
     export TARGET_ENTROPY="-3.5"
     export STD_ACTION_NOISE="0.0"
     export ANNEAL_TARGET_ENTROPY="False"
-    export REWARD_WRAPPER_PRETRAINED_PATH="/home/fmorro/INEST-MANISKILL/experiments/pretrain/rc1000-b32/"
+    export REWARD_WRAPPER_PRETRAINED_PATH="/home/fmorro/INEST-MANISKILL/experiments/pretrain/rcs1k_fr50_b16/"
 
     manage_existing_exp_folder "${HOME}/INEST-MANISKILL/experiments/sb3/${EXPERIMENT_NAME}/${RND_SEED}"
     manage_existing_exp_folder "${HOME}/INEST-MANISKILL/experiments/sb3-lr/${EXPERIMENT_NAME}/${RND_SEED}"
@@ -79,7 +79,7 @@ if [[ "$1" == "inest" ]]; then
         --mem=64GB \
         --mail-type=ALL \
         --mail-user=federico.morro@polito.it \
-        --partition=gpu_a40_ext \
+        --partition=gpu_a40 \
         --gres=gpu:1 \
         --output=${HOME}/logs/%j_${EXPERIMENT_NAME}_inest.out \
         --error=${HOME}/logs/%j_${EXPERIMENT_NAME}_inest.err \

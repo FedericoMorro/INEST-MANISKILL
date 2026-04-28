@@ -363,9 +363,10 @@ class StackPyramidEnv(BaseEnv):
                 is_cubeC_static=self.cubeC.is_static(lin_thresh=1e-2, ang_thresh=0.5)
             )
             
-            self._update_subgoal_success()   
+            self._update_subgoal_success()  
+            b = obs["tcp_pose"].shape[0] if obs["tcp_pose"].ndim > 1 else None
             obs.update(
-                subgoal=self.curr_subgoal
+                subgoal=self.curr_subgoal * torch.ones((b, 1), device=self.device) if b is not None else self.curr_subgoal
             )
         return obs
 
