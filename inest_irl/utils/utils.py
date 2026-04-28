@@ -215,7 +215,7 @@ def make_env(
   obs_mode = "state",
   frame_stack = 1,
   action_repeat = 1,
-  env_randomization = True,
+  env_randomization = "default",
   reward_scaling = 1.0,
   rank = 0,
   train_flag = False,

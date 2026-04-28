@@ -6,12 +6,14 @@ Example usage:
 python inest_irl/utils/eval_return.py
     --experiment_path ../data/inest-maniskill/_experiments/pretrain/render-cam/
     [--cache_only]
+    [--data_root ../data/inest-maniskill/dataset-rc-1000-states]
 
 
 # for different trajs
 python inest_irl/utils/eval_return.py
     --experiment_path ../data/inest-maniskill/_experiments/pretrain/render-cam/
     --diff_trajs_dataset ../data/inest-maniskill/different-trajs/
+    [--data_root ../data/inest-maniskill/dataset-rc-1000-states]
 """
 
 import os
@@ -62,7 +64,7 @@ FS_TRAJ_TITLE = 12
 #   --experiment_path ../data/inest-maniskill/_experiments/pretrain/rc1000-b32/
 
 
-def setup_from_pretrain(experiment_path, use_cpu, diff_dataset_path=None):
+def setup_from_pretrain(experiment_path, use_cpu, diff_dataset_path=None, data_root=None):
   """Load the latest embedder checkpoint and dataloaders"""
 
   config = load_config_from_dir(experiment_path)
@@ -82,6 +84,11 @@ def setup_from_pretrain(experiment_path, use_cpu, diff_dataset_path=None):
       print(f"Failed to load checkpoint: {e}")
   else:
     print("Skipping checkpoint restore (not found or disabled).")
+    
+  # override data root in config if provided as argument
+  if data_root is not None:
+    print(f"Overriding data root in config with provided argument: {data_root}")
+    config.data.root = data_root
   
   # load data -> debug active if use_cpu, otherwise use GPU-optimized dataloader settings
   train_loader = common.get_downstream_dataloaders(config, debug=use_cpu)["train"]
@@ -170,7 +177,7 @@ def compute_goal_embedding(model, train_loader, subgoal_frames, device):
   # add subgoal info for pickling, used by wrapper in rl training
   subgoal_info = {
     "c_value": 0.25,
-    "distance_thresholds": [3.0, 3.7, 3.0, 3.5],
+    "distance_thresholds": [3.0, 3.0, 3.0, 3.0],
     "patience_threshold": 0,
   }
   
@@ -417,6 +424,7 @@ def plot_mean_results(rewards, output_dir, subgoal_reachs, label="Learned Reward
   # calculate mean and std per timestep (ignoring NaNs)
   mean_reward = np.nanmean(padded_rewards, axis=0)
   std_reward = np.nanstd(padded_rewards, axis=0)
+  min_reward = np.nanmin(padded_rewards, axis=0)
   timesteps = np.arange(len(mean_reward))
   
   ax.plot(timesteps, mean_reward, 'b-', linewidth=2, label='Mean Reward')
@@ -438,9 +446,12 @@ def plot_mean_results(rewards, output_dir, subgoal_reachs, label="Learned Reward
     min_idx = np.nanargmin(mean_reward)
     min_val = mean_reward[min_idx]
     min_std = std_reward[min_idx]
-    ax.plot(min_idx, min_val, 'o', color='red', markersize=4, label='Min Distance', zorder=5)
+    ax.plot(min_idx, min_val, 'o', color='red', markersize=4, label='Min Avg Dist', zorder=5)
     ax.text(min_idx, y_low_mark, f'{min_val:.3f}\n±{min_std:.3f}', 
             ha='center', fontsize=9, bbox=dict(boxstyle='round', facecolor='red', alpha=0.5))
+    
+    # also plot minimum line across timesteps for reference
+    #ax.plot(min_reward, color='yellow', linestyle='--', linewidth=1.5, alpha=0.7, label='Min Distance')
 
   # aggregate each subgoal across trajectories and mark mean reaching timestep
   # Plot GT subgoals in purple if available
@@ -549,7 +560,8 @@ def main(args):
   model, train_loader, valid_loader, train_subgoal_frames, valid_subgoal_frames, global_step, device = setup_from_pretrain(
     args.experiment_path, 
     args.use_cpu, 
-    diff_dataset_path=args.diff_trajs_dataset
+    diff_dataset_path=args.diff_trajs_dataset,
+    data_root=args.data_root,
   )
 
   # check for cached results in output directory
@@ -650,6 +662,8 @@ if __name__ == "__main__":
   arg_parser = argparse.ArgumentParser(description="Evaluate learned reward signals based on goal embeddings")
   arg_parser.add_argument("--experiment_path", type=str, required=True,
                           help="Path to the pretraining experiment directory")
+  arg_parser.add_argument("--data_root", type=str, default=None,
+                          help="Optional override for the trajectory dataset root directory (if not provided, will use the one from the experiment config)")
   arg_parser.add_argument("--output_dir", type=str, default="/home/fmorro/INEST-MANISKILL/out/reward_plots",
                           help="Directory to save the generated plots")
   arg_parser.add_argument("--count", type=int, default=-1,

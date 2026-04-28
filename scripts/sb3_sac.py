@@ -343,6 +343,13 @@ def main(_):
 
     # Copying flags to local variables to avoid issues with VecEnv subprocesses creation
     base_seed = copy.deepcopy(FLAGS.seed)
+    eval_seed = base_seed + 1000
+    
+    # re-set seeds if same-seed randomization is used to ensure the same environment initialization across episodes
+    if config.env_randomization == "same-seed":
+        logging.info(f"Using same-seed randomization with seed {config.same_seed_randomization}. Setting base and eval seeds to {config.same_seed_randomization}.")
+        base_seed = config.same_seed_randomization
+        eval_seed = config.same_seed_randomization
 
     # Load environments
     logging.info(f"Creating {config.num_envs} environment(s)...")
@@ -359,10 +366,12 @@ def main(_):
     # Create environment function for vec_env
     if config.num_envs > 1:
         # Multiple parallel environments - pass factory function with partial args
-        env_fns = [
-            functools.partial(_make_env_wrapper, config, base_seed, rank=i, train_flag=True, learned_reward_data=learned_reward_data, exp_dir=exp_dir)
-            for i in range(config.num_envs)
-        ]
+        env_fns = []
+        for i in range(config.num_envs):
+            env_seed = base_seed + i if not config.env_randomization == "same-seed" else base_seed
+            env_fns.append(
+                functools.partial(_make_env_wrapper, config, env_seed, rank=i, train_flag=True, learned_reward_data=learned_reward_data, exp_dir=exp_dir)
+            )
         env = SubprocVecEnv(env_fns)
         # Wrap with VecMonitor to track episode statistics
         env = VecMonitor(env, os.path.join(exp_dir, "train_monitor"))
@@ -373,7 +382,7 @@ def main(_):
         env = Monitor(env, os.path.join(exp_dir, "train_monitor"))
     
     # Create evaluation environment (with different seed)
-    base_eval_env = _make_env_wrapper(config, base_seed + 1000, rank=0, train_flag=False, learned_reward_data=learned_reward_data, exp_dir=exp_dir)
+    base_eval_env = _make_env_wrapper(config, eval_seed, rank=0, train_flag=False, learned_reward_data=learned_reward_data, exp_dir=exp_dir)
     eval_env = Monitor(base_eval_env, os.path.join(exp_dir, "eval_monitor"))
 
     # Get observation and action space dimensions

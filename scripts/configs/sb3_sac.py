@@ -37,8 +37,10 @@ def get_config():
 
   config.action_repeat = 1
   config.frame_stack = 3
-  config.env_randomization = True
+  config.env_randomization = "same-seed" # "default", "minimal", "same-seed"
   config.reward_scaling = 1.0
+  
+  config.same_seed_randomization = 18   # traj_id=15
 
   config.reward_wrapper = ml_collections.ConfigDict()
   # Can be one of ['distance_to_goal', 'goal_classifier', 'inest', 'inest_knn', 'state_intrinsic', 'reds'].

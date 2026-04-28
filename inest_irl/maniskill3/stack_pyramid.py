@@ -26,7 +26,7 @@ from mani_skill.utils.structs.pose import Pose
 
 
 HORIZON = 100
-DEFAULT_RANDOMIZE_CUBES = True
+DEFAULT_RANDOMIZE_CUBES = "default"
 MAX_SUBGOAL = 4
 
 N_STEP_DENSE_REWARD = 4
@@ -54,6 +54,8 @@ class StackPyramidEnv(BaseEnv):
 
     SUPPORTED_ROBOTS = ["panda_wristcam", "panda", "fetch"]
     SUPPORTED_REWARD_MODES = ["none", "sparse", "dense", "normalized_dense"]
+    SUPPORTED_OBS_MODES = ["state", "state_dict", "rgb", "rgbd"]
+    SUPPORTED_ENV_RANDOMIZATION = ["default", "minimal", "same-seed"]
 
     agent: Union[Panda, Fetch]
 
@@ -74,7 +76,7 @@ class StackPyramidEnv(BaseEnv):
             print(f"No seed provided for environment initialization. Results may not be reproducible. Seed selected randomly: {seed}")
         self.seed = seed
         
-        self.randomize_cubes = env_randomization
+        self.env_randomization = env_randomization
         self.enforce_full_episodes = enforce_full_episodes
         
         kwargs["reward_mode"] = env_reward_type
@@ -136,7 +138,7 @@ class StackPyramidEnv(BaseEnv):
             self.prev_cubeA_pos = self.cubeA.pose.p
             self.curr_subgoal = 0
 
-            if self.randomize_cubes:
+            if self.env_randomization == "default" or self.env_randomization == "same-seed":
                 # Randomized positions and rotations
                 xyz = torch.zeros((b, 3), device=self.device)
                 xyz[:, 2] = 0.02
@@ -179,7 +181,8 @@ class StackPyramidEnv(BaseEnv):
                     lock_z=False,
                 )
                 self.cubeC.set_pose(Pose.create_from_pq(p=xyz, q=qs))
-            else:
+                
+            elif self.env_randomization == "minimal":
                 # Fixed positions with small randomization
                 # Small position noise
                 pos_noise_A = torch.randn((b, 3), device=self.device) * 0.005
@@ -309,7 +312,11 @@ class StackPyramidEnv(BaseEnv):
             if "seed" in kwargs:
                 del kwargs["seed"]
             obs, info = super().reset(seed=self.seed, **kwargs)
-            self._reset_seed()
+            
+            # reset seed to None after using it for environment initialization to allow environment randomization across episodes
+            #   however, if env_randomization="same-seed", keep the seed for the next episode to ensure the same initialization across episodes
+            if not self.env_randomization == "same-seed":
+                self._reset_seed()
         else:
             obs, info = super().reset(**kwargs)
 
