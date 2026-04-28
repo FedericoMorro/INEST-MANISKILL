@@ -5,7 +5,6 @@ echo "TRAINING HYPERPARAMETERS"
 echo " Experiment Name: $EXPERIMENT_NAME"
 echo " Dataset Path: $SCRATCH_FLASH_DATASET_PATH"
 echo " Random Seed: $RND_SEED"
-echo " Overwrite Optuna DB: $OVERWRITE_OPTUNA_DB"
 echo "====================================="
 
 # Load necessary modules (adjust based on your cluster)
@@ -91,8 +90,7 @@ CMD="python /home/fmorro/INEST-MANISKILL/scripts/opt_pretrain.py \
     --experiment_name ${EXPERIMENT_NAME} \
     --seed ${RND_SEED} \
     --wandb \
-    --data_path=${SCRATCH_FLASH_DATASET_PATH} \
-    --overwrite=${OVERWRITE_OPTUNA_DB}"
+    --data_path=${SCRATCH_FLASH_DATASET_PATH}"
 
 # Execute the command
 echo "Executing: $CMD"

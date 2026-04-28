@@ -165,7 +165,7 @@ def main(_):
           eval_logger.log({
               "epoch": epoch,
               "step": global_step,
-              "loss": valid_loss["valid/total_loss"],
+              "loss": float(valid_loss["valid/total_loss"].detach().cpu().numpy()),
           })
               
           # Evaluate the model on the downstream datasets.
@@ -187,6 +187,7 @@ def main(_):
                 eval_out.log_wandb(
                     wandb, global_step, eval_name, f"downstream_{split}"
                 )
+              #! does not work for now  
               if split == "valid" and eval_name == "kendalls_tau/scalar_mean":
                 eval_logger.log({
                     "kendalls_tau": eval_out.value,

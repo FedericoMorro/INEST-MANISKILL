@@ -45,16 +45,16 @@ class CSVLogger:
         if not os.path.isfile(self.csv_path):
             raise FileNotFoundError(f"CSV file {self.csv_path} not found.")
             
-        self.retrieval_data = {field: [] for field in self.fieldnames}
         with open(self.csv_path, "r", encoding="utf-8") as f:
+            # retrieve header and initialize fieldnames
             header = f.readline().strip().split(",")
+            self.fieldnames = header
+            self.retrieval_data = {field: [] for field in self.fieldnames}
+            # retrieve data
             for line in f:
                 values = line.strip().split(",")
                 for field, value in zip(header, values):
-                    if field in self.fieldnames:
-                        self.retrieval_data[field].append(value)
-                    else:
-                        logging.warning(f"Field {field} in CSV file not in CSVLogger fieldnames; skipping.")
+                    self.retrieval_data[field].append(value)
                         
         return self.retrieval_data
     

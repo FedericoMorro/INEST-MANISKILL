@@ -123,20 +123,7 @@ elif [[ "$1" == "pretrain" || "$1" == "opt-pretrain" ]]; then
     else # opt-pretrain
         echo "Sumitting optuna hyperparameter optimization job..."
 
-        export OVERWRITE_OPTUNA_DB="False"
-
-        EXP_DIR="${HOME}/INEST-MANISKILL/experiments/optuna/${EXPERIMENT_NAME}"
-        if [ -f "$EXP_DIR/optuna.db" ]; then
-            echo "WARNING: Optuna database ${EXP_DIR}/optuna.db already exists!"
-            echo "If you do NOT wish to resume a previous optimization, delete the existing database or choose a different experiment name."
-            read -p "Do you want to continue (c), delete the existing database (d), or exit (e)? [c/d/e]: " choice
-            case "$choice" in
-                c|C ) echo "Continuing with existing database...";;
-                d|D ) export OVERWRITE_OPTUNA_DB="True"; echo "Deleted existing database. Continuing...";;
-                e|E ) echo "Exiting..."; exit 0;;
-                * ) echo "Invalid choice. Exiting..."; exit 1;;
-            esac
-        fi
+        manage_existing_exp_folder "${HOME}/INEST-MANISKILL/experiments/opt_pretrain/${EXPERIMENT_NAME}"
 
         sbatch --job-name=inest_opt-pretrain \
             --ntasks-per-node=1 \
@@ -144,7 +131,7 @@ elif [[ "$1" == "pretrain" || "$1" == "opt-pretrain" ]]; then
             --mem=32GB \
             --mail-type=ALL \
             --mail-user=federico.morro@polito.it \
-            --partition=gpu_a40_ext \
+            --partition=gpu_a40 \
             --gres=gpu:1 \
             --output=${HOME}/logs/%j_${EXPERIMENT_NAME}_opt-pretrain.out \
             --error=${HOME}/logs/%j_${EXPERIMENT_NAME}_opt-pretrain.err \

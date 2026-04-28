@@ -43,7 +43,7 @@ flags.DEFINE_boolean("overwrite", False, "Whether to overwrite existing experime
 #flags.DEFINE_integer("epochs_max", 400, "Upper bound for epochs.")
 flags.DEFINE_integer("epochs_step", 25, "Epoch step.")
 flags.DEFINE_integer("batch_size_min", 4, "Lower bound power-of-two batch size.")
-flags.DEFINE_integer("batch_size_max", 4, "Upper bound power-of-two batch size.")
+flags.DEFINE_integer("batch_size_max", 16, "Upper bound power-of-two batch size.")
 flags.DEFINE_float("learning_rate_min", 1e-6, "Lower log-uniform bound.")
 flags.DEFINE_float("learning_rate_max", 1e-3, "Upper log-uniform bound.")
 flags.DEFINE_float("weight_decay_min", 1e-6, "Lower log-uniform bound.")
@@ -100,11 +100,12 @@ def _objective(train_script: str, out_dir: str, batch_choices: List[int], emb_si
         }
         
         print(f"[TRIAL {trial.number}] Starting trial with params: {params}")
+        curr_exp_name = f"{FLAGS.experiment_name}_trial-{trial.number:04d}"
         cmd = [
             sys.executable,
             train_script,
             f"--config.root_dir={out_dir}",
-            f"--experiment_name={trial.number:04d}",
+            f"--experiment_name={curr_exp_name}",
             f"--seed={FLAGS.seed}",
             f"--config.data.root={FLAGS.data_path}",
             "--overwrite=True",
@@ -113,6 +114,7 @@ def _objective(train_script: str, out_dir: str, batch_choices: List[int], emb_si
             f"--config.optim.lr={params['learning_rate']}",
             f"--config.optim.weight_decay={params['weight_decay']}",
             f"--config.model.embedding_size={params['embedding_size']}",
+            f"--config.frame_sampler.num_frames_per_sequence=40",
         ]
         if FLAGS.wandb:
             cmd.extend(
@@ -122,7 +124,7 @@ def _objective(train_script: str, out_dir: str, batch_choices: List[int], emb_si
                 ]
             )
 
-        trial_out = os.path.join(out_dir, f"{trial.number:04d}")
+        trial_out = os.path.join(out_dir, f"{curr_exp_name}")
         trial_log_path = os.path.join(trial_out, "trial_stdout_stderr.log")
         eval_csv_path = os.path.join(trial_out, "eval_log.csv")
         os.makedirs(trial_out, exist_ok=True)
