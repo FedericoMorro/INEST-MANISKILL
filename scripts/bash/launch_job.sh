@@ -57,7 +57,7 @@ manage_existing_scratch_flash_folder() {
 if [[ "$1" == "rl" ]]; then
     echo "Submitting INEST MANISKILL RL training job..."
 
-    export REWARD_WRAPPER_TYPE="subgoal_dist"
+    export REWARD_WRAPPER_TYPE="goal_dist"
     export REWARD_SCALING="1.0"
     export ENV_RANDOMIZATION="default"
     export REPLAY_BUFFER_CAPACITY="1_000_000"

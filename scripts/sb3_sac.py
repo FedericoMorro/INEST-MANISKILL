@@ -177,7 +177,7 @@ class EvalSaveCallback(BaseCallback):
     def __init__(self,
                  eval_env, exp_dir,
                  eval_freq, checkpoint_freq,
-                 n_eval_episodes=5, verbose=0,
+                 n_eval_episodes=5, verbose=0, save_video=False,
                  learned_reward=False, subgoal_reward=False):
         super().__init__(verbose)
         self.eval_env = eval_env
@@ -187,6 +187,7 @@ class EvalSaveCallback(BaseCallback):
         self.n_eval_episodes = n_eval_episodes
         self.learned_reward = learned_reward
         self.subgoal_reward = subgoal_reward
+        self.save_video = save_video
         
         self._last_eval = 0
         self._last_checkpoint = 0
@@ -215,7 +216,7 @@ class EvalSaveCallback(BaseCallback):
                     return_episode_subgoals=True,
                     return_env_reward=self.learned_reward,
                     return_detected_subgoals=self.subgoal_reward,
-                    return_video=True,
+                    return_video=self.save_video,
                 )
                 mean_reward = float(np.mean([np.sum(r) for r in rewards]))
                 std_reward = float(np.std([np.sum(r) for r in rewards]))
@@ -312,7 +313,7 @@ class EvalSaveCallback(BaseCallback):
                 logging.warning(f"Failed to save PNG evaluation reward plot at step {step}: {e}")
                 
             # save video of first evaluation episode
-            if videos:
+            if self.save_video and videos:
                 try:
                     import imageio
                     import cv2
@@ -633,6 +634,7 @@ def main(_):
             checkpoint_freq=int(config.checkpoint_frequency),
             n_eval_episodes=int(config.num_eval_episodes),
             verbose=1,
+            save_video=config.save_video,
             learned_reward=(config.reward_wrapper.type not in ["sparse", "env", "env_state-intrinsic"]),
             subgoal_reward=(config.reward_wrapper.type in ["subgoal_dist"]),
         )
