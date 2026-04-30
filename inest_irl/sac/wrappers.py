@@ -576,11 +576,19 @@ class SubgoalDistanceLearnedVisualRewardWrapper(LearnedVisualRewardWrapper):
     
     def reset(self, *args, **kwargs):
         self.curr_detected_subgoal = 0
+        self.detected_subgoal_idxs = []
         return super().reset(*args, **kwargs)
         
     def step(self, action):
+        prev_detected_subgoal = self.curr_detected_subgoal
+        
         obs, reward, terminated, truncated, info = super().step(action)
+        
         info["detected_subgoal"] = self.curr_detected_subgoal
+        if self.curr_detected_subgoal != prev_detected_subgoal:
+            self.detected_subgoal_idxs.append(self.unwrapped.step_count)
+        info["detected_subgoal_idxs"] = self.detected_subgoal_idxs
+        
         return obs, reward, terminated, truncated, info
 
 

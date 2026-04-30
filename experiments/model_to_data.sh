@@ -1,7 +1,7 @@
 #!/bin/bash
 
 if [ "$#" -lt 1 ]; then
-    echo "Usage: $0 <model_path> [--overwrite] [--eval_learned_return_model <dir>]"
+    echo "Usage: $0 <model_path> [--overwrite] [--eval_learned_return_model <dir>[,<data_dir>]]"
     exit 1
 fi
 
@@ -9,6 +9,7 @@ fi
 model_path="$1"
 overwrite=false
 eval_learned_return_model=""
+eval_learned_return_data_dir=""
 
 # parse optional flags
 shift 1
@@ -23,12 +24,13 @@ while [[ $# -gt 0 ]]; do
                 echo "Error: --eval_learned_return_model requires a directory argument"
                 exit 1
             fi
-            eval_learned_return_model="$2"
+            IFS=',' read -r eval_learned_return_model eval_learned_return_data_dir <<< "$2"
+
             shift 2
             ;;
         *)
             echo "Unknown flag: $1"
-            echo "Usage: $0 <model_path> [--overwrite] [--eval_learned_return_model <dir>]"
+            echo "Usage: $0 <model_path> [--overwrite] [--eval_learned_return_model <dir>[,<data_dir>]]"
             exit 1
             ;;
     esac
@@ -105,11 +107,20 @@ python inest_irl/dataset_utils/h5_to_dataset.py \
 if [ -n "$eval_learned_return_model" ]; then
     print_with_border "EVALUATING LEARNED RETURNS"
 
-    python inest_irl/utils/compute_learned_return.py \
-        --experiment_path "$eval_learned_return_model" \
-        --output_dir "${output_path}/learned_return_evaluation" \
-        --diff_trajs_dataset ${output_dataset_dir} \
-        --plot_subgoal_dists
+    if [ -z "$eval_learned_return_data_dir" ]; then
+        python inest_irl/utils/compute_learned_return.py \
+            --experiment_path "$eval_learned_return_model" \
+            --output_dir "${output_path}/learned_return_evaluation" \
+            --diff_trajs_dataset "$eval_learned_return_data_dir" \
+            --plot_subgoal_dists
+    else
+        python inest_irl/utils/compute_learned_return.py \
+            --experiment_path "$eval_learned_return_model" \
+            --output_dir "${output_path}/learned_return_evaluation" \
+            --diff_trajs_dataset "$eval_learned_return_data_dir" \
+            --data_root "$eval_learned_return_data_dir" \
+            --plot_subgoal_dists
+    fi
 else
     echo "Not evaluating learned returns. To evaluate returns, rerun the script with the --eval_learned_return_model <dir> flag."
 fi

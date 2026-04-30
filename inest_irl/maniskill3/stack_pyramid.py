@@ -26,7 +26,7 @@ from mani_skill.utils.structs.pose import Pose
 
 
 HORIZON = 100
-DEFAULT_RANDOMIZE_CUBES = "default"
+DEFAULT_ENV_RANDOMIZATION = "default"
 MAX_SUBGOAL = 4
 
 N_STEP_DENSE_REWARD = 4
@@ -66,7 +66,7 @@ class StackPyramidEnv(BaseEnv):
         env_reward_type="sparse",
         robot_uids="panda_wristcam",
         robot_init_qpos_noise=0.02,
-        env_randomization=DEFAULT_RANDOMIZE_CUBES,
+        env_randomization=DEFAULT_ENV_RANDOMIZATION,
         enforce_full_episodes=True,
         **kwargs
     ):
@@ -133,12 +133,13 @@ class StackPyramidEnv(BaseEnv):
     def _initialize_episode(self, env_idx: torch.Tensor, options: dict):
         with torch.device(self.device):
             b = len(env_idx)
+            self.table_scene.initialize(env_idx)
             
             # init subgoal tracking at the beginning of the episode for env states setting replay
             self.prev_cubeA_pos = self.cubeA.pose.p
             self.curr_subgoal = 0
 
-            if self.env_randomization == "default" or self.env_randomization == "same-seed":
+            if not self.env_randomization == "minimal":   # default randomization
                 # Randomized positions and rotations
                 xyz = torch.zeros((b, 3), device=self.device)
                 xyz[:, 2] = 0.02
@@ -182,7 +183,7 @@ class StackPyramidEnv(BaseEnv):
                 )
                 self.cubeC.set_pose(Pose.create_from_pq(p=xyz, q=qs))
                 
-            elif self.env_randomization == "minimal":
+            else:
                 # Fixed positions with small randomization
                 # Small position noise
                 pos_noise_A = torch.randn((b, 3), device=self.device) * 0.005
@@ -323,6 +324,7 @@ class StackPyramidEnv(BaseEnv):
         # init subgoal tracking at the beginning of the episode
         self.prev_cubeA_pos = self.cubeA.pose.p
         self.curr_subgoal = 0
+        self.subgoal_idxs = []
 
         return obs, info
     
@@ -335,8 +337,14 @@ class StackPyramidEnv(BaseEnv):
         self.step_count += 1
 
         # update subgoal success and add it to info
+        prev_subgoal = self.curr_subgoal
         self._update_subgoal_success()
+        
         info["subgoal"] = self.curr_subgoal
+        if self.curr_subgoal != prev_subgoal:
+            self.subgoal_idxs.append(self.step_count)
+        info["subgoal_idxs"] = self.subgoal_idxs
+        
 
         if self.enforce_full_episodes and self.step_count < HORIZON:
             terminated = torch.tensor([False], device=self.device)

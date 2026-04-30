@@ -40,14 +40,15 @@ def get_config():
   config.env_randomization = "same-seed" # "default", "minimal", "same-seed"
   config.reward_scaling = 1.0
   
-  config.same_seed_randomization = 18   # traj_id=15
+  config.same_seed_randomization = 5    # traj_id=2
+  #config.same_seed_randomization = 18   # traj_id=15
 
   config.reward_wrapper = ml_collections.ConfigDict()
   # Can be one of ['distance_to_goal', 'goal_classifier', 'inest', 'inest_knn', 'state_intrinsic', 'reds'].
   #   currently supported -> ['sparse', 'env', 'env_state-intrinsic', 'goal_dist', 'subgoal-dist']
   config.reward_wrapper.type = "subgoal_dist"
   # Needed if using a vision-based learned reward wrapper
-  config.reward_wrapper.pretrained_path = "/data/fmorro/inest-maniskill/_experiments/pretrain/render-cam/"
+  config.reward_wrapper.pretrained_path = "/data/fmorro/inest-maniskill/_experiments/pretrain/rcs1k_fr50_b16/"
 
   # Number of parallel environments to use for training
   config.num_envs = 32

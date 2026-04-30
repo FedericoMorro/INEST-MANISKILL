@@ -25,6 +25,7 @@ def evaluate_policy(
     return_episode_subgoals: bool = False,
     return_env_reward: bool = False,
     return_detected_subgoals: bool = False,
+    return_video: bool = False,
 
 ) -> tuple[float, float] | tuple[list[float], list[int]]:
     """
@@ -87,24 +88,40 @@ def evaluate_policy(
     episode_lengths = []
 
     if return_episode_subgoals:
-        episodes_subgoals = []
+        episodes_subgoals_idxs = []
         max_subgoal = env.get_attr("max_subgoal", 0)[0]
         
     if return_env_reward:
         episode_env_rewards = []
         
     if return_detected_subgoals:
-        episodes_detected_subgoals = []
+        episodes_detected_subgoals_idxs = []
 
     episode_counts = np.zeros(n_envs, dtype="int")
     # Divides episodes among different sub environments in the vector as evenly as possible
     episode_count_targets = np.array([(n_eval_episodes + i) // n_envs for i in range(n_envs)], dtype="int")
+    
 
     current_rewards = np.zeros(n_envs)
     current_lengths = np.zeros(n_envs, dtype="int")
     observations = env.reset()
     states = None
     episode_starts = np.ones((env.num_envs,), dtype=bool)
+    
+    # Track step-by-step rewards per episode when return_episode_rewards is True
+    if return_episode_rewards:
+        current_episode_rewards = [[] for _ in range(n_envs)]
+        if return_env_reward:
+            current_episode_env_rewards = [[] for _ in range(n_envs)]
+    
+    if return_env_reward:
+        current_env_rewards = np.zeros(n_envs)
+    if return_video:
+        envs_videos = []
+        curr_env_videos = [[] for _ in range(n_envs)]
+        for i in range(n_envs):
+            curr_env_videos[i].append(env.envs[i].render().detach().cpu().numpy()[0,::])  # save initial frame
+    
     while (episode_counts < episode_count_targets).any():
         actions, states = model.predict(
             observations,  # type: ignore[arg-type]
@@ -115,6 +132,8 @@ def evaluate_policy(
         new_observations, rewards, dones, infos = env.step(actions)
         current_rewards += rewards
         current_lengths += 1
+        
+        
         for i in range(n_envs):
             if episode_counts[i] < episode_count_targets[i]:
                 # unpack values so that the callback can access the local variables
@@ -122,6 +141,17 @@ def evaluate_policy(
                 done = dones[i]
                 info = infos[i]
                 episode_starts[i] = done
+                
+                # Track step-by-step rewards if requested
+                if return_episode_rewards:
+                    current_episode_rewards[i].append(float(reward))
+                    if return_env_reward:
+                        current_episode_env_rewards[i].append(float(infos[i].get("env_reward", 0)))
+                
+                if return_env_reward:
+                    current_env_rewards[i] += infos[i].get("env_reward", None)        
+                if return_video:
+                    curr_env_videos[i].append(env.envs[i].render().detach().cpu().numpy()[0,::])
 
                 if callback is not None:
                     callback(locals(), globals())
@@ -135,37 +165,66 @@ def evaluate_policy(
                             # Do not trust "done" with episode endings.
                             # Monitor wrapper includes "episode" key in info if environment
                             # has been wrapped with it. Use those rewards instead.
-                            episode_rewards.append(info["episode"]["r"])
+                            if return_episode_rewards:
+                                episode_rewards.append(current_episode_rewards[i])
+                            else:
+                                episode_rewards.append(info["episode"]["r"])
+                                
                             episode_lengths.append(info["episode"]["l"])
                             # Only increment at the real end of an episode
                             episode_counts[i] += 1
 
-                            if return_episode_subgoals:
-                                episodes_subgoals.append(info.get("subgoal", 0))
                             if return_env_reward:
-                                episode_env_rewards.append(info.get("cum_env_reward", 0))
+                                if return_episode_rewards:
+                                    episode_env_rewards.append(current_episode_env_rewards[i])
+                                else:
+                                    episode_env_rewards.append(current_env_rewards[i])
+                                    
+                            if return_episode_subgoals:
+                                episodes_subgoals_idxs.append(info.get("subgoal_idxs", []))
                             if return_detected_subgoals:
-                                episodes_detected_subgoals.append(info.get("detected_subgoal", 0))
+                                episodes_detected_subgoals_idxs.append(info.get("detected_subgoal_idxs", []))
+                                
+                            if return_video:
+                                envs_videos.append(curr_env_videos[i])
                                 
                     else:
-                        episode_rewards.append(current_rewards[i])
+                        if return_episode_rewards:
+                            episode_rewards.append(current_episode_rewards[i])
+                        else:
+                            episode_rewards.append(current_rewards[i])
                         episode_lengths.append(current_lengths[i])
                         episode_counts[i] += 1
 
-                        if return_episode_subgoals:
-                            episodes_subgoals.append(info.get("subgoal", 0))
                         if return_env_reward:
-                            episode_env_rewards.append(info.get("cum_env_reward", 0))
+                            if return_episode_rewards:
+                                episode_env_rewards.append(current_episode_env_rewards[i])
+                            else:
+                                episode_env_rewards.append(current_env_rewards[i])
+                                
+                        if return_episode_subgoals:
+                            episodes_subgoals_idxs.append(info.get("subgoal_idxs", []))
                         if return_detected_subgoals:
-                            episodes_detected_subgoals.append(info.get("detected_subgoal", 0))
+                            episodes_detected_subgoals_idxs.append(info.get("detected_subgoal_idxs", []))
+                            
+                        if return_video:
+                            envs_videos.append(curr_env_videos[i])
 
                     current_rewards[i] = 0
                     current_lengths[i] = 0
+                    
+                    if return_env_reward:
+                        current_env_rewards[i] = 0
+                    
+                    if return_episode_rewards:
+                        current_episode_rewards[i] = []
+                        if return_env_reward:
+                            current_episode_env_rewards[i] = []
+                        
+                    if return_video:
+                        curr_env_videos[i] = []
 
         observations = new_observations
-
-        if render:
-            env.render()
 
     mean_reward = np.mean(episode_rewards)
     std_reward = np.std(episode_rewards)
@@ -177,13 +236,18 @@ def evaluate_policy(
     additional_info = {}
     
     if return_episode_subgoals:
-        additional_info["episode_subgoals"] = subgoals_list_to_perc_dict(episodes_subgoals, max_subgoal, n_eval_episodes)
+        additional_info["episode_subgoals"] = subgoals_list_to_perc_dict(episodes_subgoals_idxs, max_subgoal, n_eval_episodes, is_list_of_idxs=True)
+        additional_info["episode_subgoal_idxs"] = episodes_subgoals_idxs
         
     if return_env_reward:
         additional_info["episode_env_rewards"] = episode_env_rewards
         
     if return_detected_subgoals:
-        additional_info["episodes_detected_subgoals"] = subgoals_list_to_perc_dict(episodes_detected_subgoals, max_subgoal, n_eval_episodes)
+        additional_info["episode_detected_subgoals"] = subgoals_list_to_perc_dict(episodes_detected_subgoals_idxs, max_subgoal, n_eval_episodes, is_list_of_idxs=True)
+        additional_info["episode_detected_subgoal_idxs"] = episodes_detected_subgoals_idxs
+        
+    if return_video:
+        additional_info["episode_videos"] = envs_videos
         
     if additional_info:
         if return_episode_rewards:

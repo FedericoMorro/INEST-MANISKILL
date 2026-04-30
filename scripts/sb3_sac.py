@@ -2,6 +2,7 @@ from absl import app, flags, logging
 import copy
 import functools
 import json
+import matplotlib.pyplot as plt
 from ml_collections import config_flags
 import numpy as np
 import os
@@ -9,8 +10,6 @@ import random
 import time
 import torch
 import wandb
-
-from mani_skill.vector.wrappers.sb3 import ManiSkillSB3VectorEnv
 
 from stable_baselines3 import SAC
 from stable_baselines3.common.callbacks import BaseCallback
@@ -21,6 +20,8 @@ from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor
 from stable_baselines3.her.her_replay_buffer import HerReplayBuffer
 
 from inest_irl.utils import utils
+
+from eval_policy import generate_reward_plot
 
 FLAGS = flags.FLAGS
 
@@ -167,39 +168,123 @@ class EvalSaveCallback(BaseCallback):
                     return_episode_subgoals=True,
                     return_env_reward=self.learned_reward,
                     return_detected_subgoals=self.subgoal_reward,
+                    return_video=True,
                 )
-                mean_reward = float(np.mean(rewards))
-                std_reward = float(np.std(rewards))
+                mean_reward = float(np.mean([np.sum(r) for r in rewards]))
+                std_reward = float(np.std([np.sum(r) for r in rewards]))
                 mean_length = float(np.mean(lengths))
                 subgoals_dict = additional_info.get("episode_subgoals", {})
+                subgoals_idxs = additional_info.get("episode_subgoal_idxs", [])
                 env_rewards = additional_info.get("episode_env_rewards", [])
-                detected_subgoals_dict = additional_info.get("episodes_detected_subgoals", {})
+                if env_rewards:
+                    if isinstance(env_rewards[0], list):
+                        # List of lists - sum each episode's rewards
+                        mean_env_reward = float(np.mean([np.sum(r) for r in env_rewards]))
+                        std_env_reward = float(np.std([np.sum(r) for r in env_rewards]))
+                    else:
+                        # Flat list of scalars
+                        mean_env_reward = float(np.mean(env_rewards))
+                        std_env_reward = float(np.std(env_rewards))
+                else:
+                    mean_env_reward = None
+                    std_env_reward = None
+                detected_subgoals_dict = additional_info.get("episode_detected_subgoals", {})
+                detected_subgoals_idxs = additional_info.get("episode_detected_subgoal_idxs", [])
+                videos = additional_info.get("episode_videos", [])
             except Exception as e:
                 logging.warning(f"Evaluation failed at step {step}: {e}")
                 mean_reward = float("nan")
                 std_reward = float("nan")
                 mean_length = float("nan")
                 subgoals_dict = {}
+                subgoals_idxs = []
                 env_rewards = []
+                mean_env_reward = float("nan")
+                std_env_reward = float("nan")
                 detected_subgoals_dict = {}
+                detected_subgoals_idxs = []
+                videos = []
                 
-            # Save evaluation results to JSON
+            # save evaluation results to JSON
             eval_dir = os.path.join(self.exp_dir, "evaluation")
             os.makedirs(eval_dir, exist_ok=True)
-            results_path = os.path.join(eval_dir, f"eval_{step}.json")
+            results_path = os.path.join(eval_dir, f"{step}.json")
             try:
+                # Convert rewards to serializable format (handle list of lists)
+                rewards_serializable = []
+                for r in rewards:
+                    if isinstance(r, (list, np.ndarray)):
+                        rewards_serializable.append([float(x) for x in r])
+                    else:
+                        rewards_serializable.append(float(r))
+                
+                # Convert env_rewards to serializable format (handle list of lists)
+                env_rewards_serializable = []
+                for r in env_rewards:
+                    if isinstance(r, (list, np.ndarray)):
+                        env_rewards_serializable.append([float(x) for x in r])
+                    else:
+                        env_rewards_serializable.append(float(r))
+                
                 with open(results_path, "w") as f:
                     json.dump({
                         "mean_reward": mean_reward,
                         "std_reward": std_reward,
                         "mean_length": mean_length,
-                        "rewards": rewards if isinstance(rewards, list) else list(rewards),
+                        "rewards": rewards_serializable,
                         "subgoals": subgoals_dict,
-                        "env_rewards": env_rewards,
+                        "subgoal_idxs": subgoals_idxs,
+                        "env_rewards": env_rewards_serializable,
+                        "mean_env_reward": mean_env_reward,
+                        "std_env_reward": std_env_reward,
                         "detected_subgoals": detected_subgoals_dict,
+                        "detected_subgoal_idxs": detected_subgoals_idxs,
                     }, f, indent=2)
-            except Exception:
-                pass
+            except Exception as e:
+                logging.warning(f"Failed to save JSON evaluation results at step {step}: {e}")
+            
+            # save reward plot
+            plot_path = os.path.join(eval_dir, f"{step}.png")
+            try:
+                fig, axs = plt.subplots(4, 4, figsize=(40, 20))
+                for i in range(min(len(rewards), 16)):
+                    generate_reward_plot(
+                        ax=axs[i // 4, i % 4],
+                        rewards=rewards[i],
+                        subgoal_idxs=subgoals_idxs[i] if i < len(subgoals_idxs) else None,
+                        env_rewards=env_rewards[i] if i < len(env_rewards) else None,
+                        detected_subgoal_idxs=detected_subgoals_idxs[i] if i < len(detected_subgoals_idxs) else None,
+                        title=f"Episode {i}",
+                    )
+                plt.tight_layout()
+                plt.savefig(plot_path, dpi=300)
+                plt.close(fig)
+            except Exception as e:
+                logging.warning(f"Failed to save PNG evaluation reward plot at step {step}: {e}")
+                
+            # save video of first evaluation episode
+            if videos:
+                try:
+                    import imageio
+                    import cv2
+                    
+                    videos_path = os.path.join(eval_dir, "videos")
+                    os.makedirs(videos_path, exist_ok=True)
+                    
+                    for i, video in enumerate(videos):
+                        if video is None:
+                            logging.warning(f"Video {i} is None at step {step}. Skipping video saving.")
+                            continue
+                        
+                        video_path = os.path.join(videos_path, f"{step}_env{i}.mp4")
+                        try:
+                            # resize frames to 512x512 if needed
+                            video_rs = [v if v.shape[0] == 512 else cv2.resize(v, (512, 512)) for v in video]
+                            imageio.mimwrite(video_path, video_rs, fps=10)
+                        except Exception as e:
+                            logging.warning(f"Failed to save video {i} at step {step}: {e}")
+                except Exception as e:
+                    logging.warning(f"Failed to save evaluation video at step {step}: {e}")
 
             # Update best mean reward for checkpoint saving
             if not np.isnan(mean_reward):
@@ -223,8 +308,8 @@ class EvalSaveCallback(BaseCallback):
                             log_dict[f"eval/subgoal_{subgoal}_%"] = val
 
                     if env_rewards:
-                        log_dict["eval/mean_env_reward"] = float(np.mean(env_rewards))
-                        log_dict["eval/std_env_reward"] = float(np.std(env_rewards))
+                        log_dict["eval/mean_env_reward"] = mean_env_reward
+                        log_dict["eval/std_env_reward"] = std_env_reward
                         
                     if detected_subgoals_dict:
                         for subgoal, val in detected_subgoals_dict.items():
@@ -232,10 +317,15 @@ class EvalSaveCallback(BaseCallback):
                                 log_dict[f"eval/detected_failed_%"] = val
                             else:
                                 log_dict[f"eval/detected_subgoal_{subgoal}_%"] = val
+                                
+                    log_dict["eval_viz/reward_plot"] = wandb.Image(plot_path)
+                    if os.path.exists(f"{videos_path}/{step}_env0.mp4"):
+                        log_dict["eval_viz/video_env0"] = wandb.Video(f"{videos_path}/{step}_env0.mp4", format="mp4")
 
                     wandb.log(log_dict, step=step)
-                except Exception:
-                    pass
+                    
+                except Exception as e:
+                    logging.warning(f"Failed to log to wandb at step {step}: {e}")
 
         # Checkpoint saving at checkpoint_frequency
         if step - self._last_checkpoint >= self.checkpoint_freq:
