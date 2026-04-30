@@ -7,7 +7,6 @@ python inest_irl/utils/eval_return.py
     --experiment_path ../data/inest-maniskill/_experiments/pretrain/render-cam/
     [--cache_only]
     [--data_root ../data/inest-maniskill/dataset-rc-1000-states]
-    [--plot_subgoal_dists]
 
 
 # for different trajs
