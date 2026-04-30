@@ -34,7 +34,7 @@ import wandb
 
 from configs import validate_config
 from inest_irl.utils.utils import setup_experiment
-from inest_irl.utils.csv_logger import CSVLogger
+from inest_irl.utils.loggers import CSVLogger
 
 # pylint: disable=logging-fstring-interpolation
 

@@ -20,6 +20,7 @@ from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor
 from stable_baselines3.her.her_replay_buffer import HerReplayBuffer
 
 from inest_irl.utils import utils
+from inest_irl.utils.loggers import CSVLogger
 
 from eval_policy import generate_reward_plot
 
@@ -39,25 +40,48 @@ config_flags.DEFINE_config_file(
 )
 
 
-class WandbCallback(BaseCallback):
+class LogWandbCallback(BaseCallback):
     """Callback to log TensorBoard metrics to Weights & Biases."""
+    
+    TRAIN_LOG_CSV_KEYS = [
+        "step",
+        "actor_loss", "critic_loss", "ent_coef_loss",
+        "ent_coef", "learning_rate", "target_entropy",
+        "episodes", "n_updates", "total_timesteps", "time_elapsed", "fps", "remaining_time",
+    ]
+    ROLLOUT_LOG_CSV_KEYS = [
+        "step",
+        "ep_rew_mean", "ep_rew_std", "ep_len_mean", "ep_success_mean",
+        "failed_%", "subgoal_1_%", "subgoal_2_%", "subgoal_3_%", "subgoal_4_%",
+        "ep_env_rew_mean", "ep_env_rew_std",
+        "detected_failed_%", "detected_subgoal_1_%", "detected_subgoal_2_%", "detected_subgoal_3_%", "detected_subgoal_4_%",
+    ]
+    
     def __init__(self, exp_dir, log_freq, verbose=0):
         super().__init__(verbose)
         self.exp_dir = exp_dir
         self.log_freq = log_freq
         self.last_log_time = None
         self.last_log_step = 0
+        
+        self.train_csv_logger = CSVLogger(os.path.join(exp_dir, "train_log.csv"))
+        self.rollout_csv_logger = CSVLogger(os.path.join(exp_dir, "rollout_log.csv"))
+        
+        self.train_csv_logger.init_logging(self.TRAIN_LOG_CSV_KEYS)
+        self.rollout_csv_logger.init_logging(self.ROLLOUT_LOG_CSV_KEYS)
 
     def _on_step(self) -> bool:
         if self.num_timesteps % self.log_freq == 0:
-            metrics = {}
+            log_dict = {
+                "train/step": self.num_timesteps,
+            }
             
             # Estimate remaining training time based on iteration speed
             current_time = time.time()
             if self.last_log_time is not None:
                 iter_per_sec = (self.num_timesteps - self.last_log_step) / (current_time - self.last_log_time + 1e-8)
                 remaining_time = (self.model._total_timesteps - self.num_timesteps) / (iter_per_sec + 1e-8)
-                metrics["train/remaining_time"] = float(remaining_time / 3600)  # convert to hours
+                log_dict["train/remaining_time"] = float(remaining_time / 3600)  # convert to hours
             self.last_log_time = current_time
             self.last_log_step = self.num_timesteps
             
@@ -67,7 +91,7 @@ class WandbCallback(BaseCallback):
                 logger_dict = self.model.logger.name_to_value
                 for key, value in logger_dict.items():
                     if isinstance(value, (int, float)):
-                        metrics[f"{key}"] = float(value)
+                        log_dict[f"{key}"] = float(value)
             except Exception:
                 pass
 
@@ -76,14 +100,14 @@ class WandbCallback(BaseCallback):
                 if hasattr(self.model, 'ep_info_buffer') and len(self.model.ep_info_buffer) > 0:
                     rewards = [ep_info["r"] for ep_info in self.model.ep_info_buffer]
                     lengths = [ep_info["l"] for ep_info in self.model.ep_info_buffer]
-                    metrics['rollout/ep_rew_mean'] = float(np.mean(rewards))
-                    metrics['rollout/ep_rew_std'] = float(np.std(rewards))
-                    metrics['rollout/ep_len_mean'] = float(np.mean(lengths))
+                    log_dict['rollout/ep_rew_mean'] = float(np.mean(rewards))
+                    log_dict['rollout/ep_rew_std'] = float(np.std(rewards))
+                    log_dict['rollout/ep_len_mean'] = float(np.mean(lengths))
                     if hasattr(self.model, 'ep_success_buffer') and len(self.model.ep_success_buffer) > 0:
                         successes = [float(s) for s in self.model.ep_success_buffer]
-                        metrics['rollout/ep_success_mean'] = float(np.mean(successes))
+                        log_dict['rollout/ep_success_mean'] = float(np.mean(successes))
                     else:
-                        metrics['rollout/ep_success_mean'] = float(0)
+                        log_dict['rollout/ep_success_mean'] = float(0)
                         
                 # Extract additional episode info: subgoals, env_reward, detected_subgoals
                 if hasattr(self.model, 'ep_add_info_buffer') and len(self.model.ep_add_info_buffer) > 0:
@@ -93,20 +117,20 @@ class WandbCallback(BaseCallback):
                     if "subgoal" in self.model.ep_add_info_buffer:
                         for subgoal, count in self.model.ep_add_info_buffer.get("subgoal", {}).items():
                             if subgoal == 0:
-                                metrics[f"rollout/failed_%"] = float(count)
+                                log_dict[f"rollout/failed_%"] = float(count)
                             else:
-                                metrics[f"rollout/subgoal_{subgoal}_%"] = float(count)
+                                log_dict[f"rollout/subgoal_{subgoal}_%"] = float(count)
                     
                     if "cum_env_reward" in self.model.ep_add_info_buffer:
-                        metrics["rollout/ep_env_rew_mean"] = float(np.mean(self.model.ep_add_info_buffer["cum_env_reward"]))
-                        metrics["rollout/ep_env_rew_std"] = float(np.std(self.model.ep_add_info_buffer["cum_env_reward"]))
+                        log_dict["rollout/ep_env_rew_mean"] = float(np.mean(self.model.ep_add_info_buffer["cum_env_reward"]))
+                        log_dict["rollout/ep_env_rew_std"] = float(np.std(self.model.ep_add_info_buffer["cum_env_reward"]))
                         
                     if "detected_subgoal" in self.model.ep_add_info_buffer:
                         for subgoal, count in self.model.ep_add_info_buffer.get("detected_subgoal", {}).items():
                             if subgoal == 0:
-                                metrics[f"rollout/detected_failed_%"] = float(count)
+                                log_dict[f"rollout/detected_failed_%"] = float(count)
                             else:
-                                metrics[f"rollout/detected_subgoal_{subgoal}_%"] = float(count)
+                                log_dict[f"rollout/detected_subgoal_{subgoal}_%"] = float(count)
                                 
                     self.ep_add_info_buffer.clear()
                         
@@ -118,18 +142,38 @@ class WandbCallback(BaseCallback):
             try:
                 if hasattr(self.model, 'log_time_buffer'):
                     for key, value in self.model.log_time_buffer.items():
-                        metrics[key] = float(value)
+                        log_dict[key] = float(value)
             except Exception:
                 pass
 
             try:
-                wandb.log(metrics, step=self.num_timesteps)
-            except Exception:
-                pass
+                # log to csv, train and rollout logs separated (removing prefixes)
+                train_log_dict = {k.split("/", 1)[1]: v for k, v in log_dict.items() if k.startswith("train/") or k.startswith("time/")}
+                rollout_log_dict = {k.split("/", 1)[1]: v for k, v in log_dict.items() if k.startswith("rollout/")}
+                rollout_log_dict["step"] = self.num_timesteps  # add step to rollout log dict as well
+                
+                self.train_csv_logger.log_and_flush(train_log_dict)
+                self.rollout_csv_logger.log_and_flush(rollout_log_dict)
+
+                if wandb.run is not None:
+                    wandb.log(log_dict, step=self.num_timesteps)
+                    
+            except Exception as e:
+                logging.warning(f"Failed to log metrics at step {self.num_timesteps}: {e}")
+                
         return True
 
 class EvalSaveCallback(BaseCallback):
     """Periodic evaluation callback that saves returns, saves models, and logs to wandb."""
+    
+    CSV_LOG_KEYS = [
+        "step",
+        "mean_reward", "std_reward", "mean_length",
+        "failed_%", "subgoal_1_%", "subgoal_2_%", "subgoal_3_%", "subgoal_4_%",
+        "mean_env_reward", "std_env_reward",
+        "detected_failed_%", "detected_subgoal_1_%", "detected_subgoal_2_%", "detected_subgoal_3_%", "detected_subgoal_4_%",
+    ]
+
     def __init__(self,
                  eval_env, exp_dir,
                  eval_freq, checkpoint_freq,
@@ -147,6 +191,9 @@ class EvalSaveCallback(BaseCallback):
         self._last_eval = 0
         self._last_checkpoint = 0
         self.best_mean_reward = float("-inf")
+        
+        self.csv_logger = CSVLogger(os.path.join(exp_dir, "eval_log.csv"))
+        self.csv_logger.init_logging(self.CSV_LOG_KEYS)
         
     def _on_step(self) -> bool:
         try:
@@ -208,6 +255,8 @@ class EvalSaveCallback(BaseCallback):
             # save evaluation results to JSON
             eval_dir = os.path.join(self.exp_dir, "evaluation")
             os.makedirs(eval_dir, exist_ok=True)
+            videos_path = os.path.join(eval_dir, "videos")
+            os.makedirs(videos_path, exist_ok=True)
             results_path = os.path.join(eval_dir, f"{step}.json")
             try:
                 # Convert rewards to serializable format (handle list of lists)
@@ -268,9 +317,6 @@ class EvalSaveCallback(BaseCallback):
                     import imageio
                     import cv2
                     
-                    videos_path = os.path.join(eval_dir, "videos")
-                    os.makedirs(videos_path, exist_ok=True)
-                    
                     for i, video in enumerate(videos):
                         if video is None:
                             logging.warning(f"Video {i} is None at step {step}. Skipping video saving.")
@@ -291,41 +337,47 @@ class EvalSaveCallback(BaseCallback):
                 if mean_reward > self.best_mean_reward:
                     self.best_mean_reward = mean_reward
 
-            # Log to wandb
-            if wandb.run is not None:
-                try:
-                    log_dict = {
-                        "eval/mean_reward": mean_reward,
-                        "eval/std_reward": std_reward,
-                        "eval/mean_length": mean_length,
-                        "train/step": step,
-                    }
+            # Log
+            try:
+                log_dict = {
+                    "eval/mean_reward": mean_reward,
+                    "eval/std_reward": std_reward,
+                    "eval/mean_length": mean_length,
+                }
 
-                    for subgoal, val in subgoals_dict.items():
-                        if subgoal == 0:
-                            log_dict[f"eval/failed_%"] = val
-                        else:
-                            log_dict[f"eval/subgoal_{subgoal}_%"] = val
+                for subgoal, val in subgoals_dict.items():
+                    if subgoal == 0:
+                        log_dict[f"eval/failed_%"] = val
+                    else:
+                        log_dict[f"eval/subgoal_{subgoal}_%"] = val
 
-                    if env_rewards:
-                        log_dict["eval/mean_env_reward"] = mean_env_reward
-                        log_dict["eval/std_env_reward"] = std_env_reward
-                        
-                    if detected_subgoals_dict:
-                        for subgoal, val in detected_subgoals_dict.items():
-                            if subgoal == 0:
-                                log_dict[f"eval/detected_failed_%"] = val
-                            else:
-                                log_dict[f"eval/detected_subgoal_{subgoal}_%"] = val
-                                
-                    log_dict["eval_viz/reward_plot"] = wandb.Image(plot_path)
-                    if os.path.exists(f"{videos_path}/{step}_env0.mp4"):
-                        log_dict["eval_viz/video_env0"] = wandb.Video(f"{videos_path}/{step}_env0.mp4", format="mp4")
-
-                    wandb.log(log_dict, step=step)
+                if env_rewards:
+                    log_dict["eval/mean_env_reward"] = mean_env_reward
+                    log_dict["eval/std_env_reward"] = std_env_reward
                     
-                except Exception as e:
-                    logging.warning(f"Failed to log to wandb at step {step}: {e}")
+                if detected_subgoals_dict:
+                    for subgoal, val in detected_subgoals_dict.items():
+                        if subgoal == 0:
+                            log_dict[f"eval/detected_failed_%"] = val
+                        else:
+                            log_dict[f"eval/detected_subgoal_{subgoal}_%"] = val
+                            
+                # log to csv
+                csv_log_dict = {k.split("/", 1)[1]: v for k, v in log_dict.items()}
+                csv_log_dict["step"] = step  # add step to csv log dict
+                self.csv_logger.log_and_flush(csv_log_dict)
+                            
+                # add media for wandb logging
+                log_dict["eval_viz/reward_plot"] = wandb.Image(plot_path)
+                if os.path.exists(f"{videos_path}/{step}_env0.mp4"):
+                    log_dict["eval_viz/video_env0"] = wandb.Video(f"{videos_path}/{step}_env0.mp4", format="mp4")
+
+                # log to wandb
+                if wandb.run is not None:
+                    wandb.log(log_dict, step=step)
+                
+            except Exception as e:
+                logging.warning(f"Failed to log to wandb at step {step}: {e}")
 
         # Checkpoint saving at checkpoint_frequency
         if step - self._last_checkpoint >= self.checkpoint_freq:
@@ -568,8 +620,9 @@ def main(_):
 
     # Setup callbacks
     callbacks = []
-    if FLAGS.wandb:
-        callbacks.append(WandbCallback(exp_dir, config.log_frequency))
+    
+    # Append custom callback for logging to CSV and W&B
+    callbacks.append(LogWandbCallback(exp_dir, config.log_frequency))
     
     # Add periodic evaluation and save callback
     callbacks.append(
