@@ -40,8 +40,8 @@ def get_config():
   config.env_randomization = "same-seed" # "default", "minimal", "same-seed"
   config.reward_scaling = 1.0
   
-  config.same_seed_randomization = 5    # traj_id=2
-  #config.same_seed_randomization = 18   # traj_id=15
+  #config.same_seed_randomization = 5    # traj_id=2
+  config.same_seed_randomization = 18   # traj_id=15
 
   config.reward_wrapper = ml_collections.ConfigDict()
   # Can be one of ['distance_to_goal', 'goal_classifier', 'inest', 'inest_knn', 'state_intrinsic', 'reds'].
@@ -56,11 +56,11 @@ def get_config():
   # ================================================= #
   # Training parameters.
   # ================================================= #
-  config.num_train_steps = 50_000_000
+  config.num_train_steps = 30_000_000
   config.replay_buffer_capacity = 1_000_000
   config.num_seed_steps = 30_000
   config.num_eval_episodes = 50 #150
-  config.eval_frequency = 1_000_000
+  config.eval_frequency = 500_000
   config.checkpoint_frequency = 1_000_000
   config.log_frequency = 1_000 #20_000
   config.save_video = True
