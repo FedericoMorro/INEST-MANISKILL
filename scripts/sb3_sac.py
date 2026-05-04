@@ -421,6 +421,7 @@ def _make_env_wrapper(config, seed, rank, train_flag, learned_reward_data, exp_d
         frame_stack=config.frame_stack,
         action_repeat=config.action_repeat,
         env_randomization=config.env_randomization,
+        render_camera=config.render_camera,
         reward_scaling=config.reward_scaling,
         rank=rank,
         train_flag=train_flag,

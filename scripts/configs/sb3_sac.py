@@ -38,6 +38,7 @@ def get_config():
   config.action_repeat = 1
   config.frame_stack = 3
   config.env_randomization = "same-seed" # "default", "minimal", "same-seed"
+  config.render_camera = "base_camera"  # "base_camera", "render_camera"
   config.reward_scaling = 1.0
   
   #config.same_seed_randomization = 5    # traj_id=2

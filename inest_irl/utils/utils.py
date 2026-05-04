@@ -216,6 +216,7 @@ def make_env(
   frame_stack = 1,
   action_repeat = 1,
   env_randomization = "default",
+  render_camera = "base_camera",
   reward_scaling = 1.0,
   rank = 0,
   train_flag = False,
@@ -266,6 +267,7 @@ def make_env(
     render_mode="rgb_array",
     env_reward_type="normalized_dense",
     env_randomization=env_randomization,
+    render_camera=render_camera,
     enforce_full_episodes=True,
   )
 

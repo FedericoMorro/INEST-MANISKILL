@@ -27,6 +27,7 @@ from mani_skill.utils.structs.pose import Pose
 
 HORIZON = 100
 DEFAULT_ENV_RANDOMIZATION = "default"
+DEFAULT_RENDER_CAMERA = "base_camera"
 MAX_SUBGOAL = 4
 
 N_STEP_DENSE_REWARD = 4
@@ -54,8 +55,9 @@ class StackPyramidEnv(BaseEnv):
 
     SUPPORTED_ROBOTS = ["panda_wristcam", "panda", "fetch"]
     SUPPORTED_REWARD_MODES = ["none", "sparse", "dense", "normalized_dense"]
-    SUPPORTED_OBS_MODES = ["state", "state_dict", "rgb", "rgbd"]
+    #SUPPORTED_OBS_MODES = ["state", "state_dict", "rgb", "rgbd"]   #! do not uncomment otherwise rgb+state_dict won't work
     SUPPORTED_ENV_RANDOMIZATION = ["default", "minimal", "same-seed"]
+    SUPPORTED_RENDER_CAMERAS = ["base_camera", "render_camera"]
 
     agent: Union[Panda, Fetch]
 
@@ -67,6 +69,7 @@ class StackPyramidEnv(BaseEnv):
         robot_uids="panda_wristcam",
         robot_init_qpos_noise=0.02,
         env_randomization=DEFAULT_ENV_RANDOMIZATION,
+        render_camera=DEFAULT_RENDER_CAMERA,
         enforce_full_episodes=True,
         **kwargs
     ):
@@ -78,6 +81,7 @@ class StackPyramidEnv(BaseEnv):
         
         self.env_randomization = env_randomization
         self.enforce_full_episodes = enforce_full_episodes
+        self.render_camera = render_camera
         
         kwargs["reward_mode"] = env_reward_type
         self.max_subgoal = MAX_SUBGOAL
@@ -90,17 +94,20 @@ class StackPyramidEnv(BaseEnv):
 
     @property
     def _default_sensor_configs(self):
-        #pose = sapien_utils.look_at(eye=[0.3, 0, 0.4], target=[-0.05, 0, 0.1])
-        #return [CameraConfig("base_camera", pose, 128, 128, np.pi / 2, 0.01, 100)]
-        pose = sapien_utils.look_at([0.6, 0.7, 0.6], [0.0, 0.0, 0.35])
-        return CameraConfig("base_camera", pose, 128, 128, 1, 0.01, 100)
+        pose = sapien_utils.look_at(eye=[0.3, 0, 0.4], target=[-0.05, 0, 0.1])
+        return [CameraConfig("base_camera", pose, 128, 128, np.pi / 2, 0.01, 100)]
 
     @property
     def _default_human_render_camera_configs(self):
         #pose = sapien_utils.look_at([0.6, 0.7, 0.6], [0.0, 0.0, 0.35])
         #return CameraConfig("render_camera", pose, 512, 512, 1, 0.01, 100)
-        pose = sapien_utils.look_at([0.6, 0.7, 0.6], [0.0, 0.0, 0.35])
-        return CameraConfig("render_camera", pose, 128, 128, 1, 0.01, 100)
+        if self.render_camera == "render_camera":
+            pose = sapien_utils.look_at([0.6, 0.7, 0.6], [0.0, 0.0, 0.35])
+            return CameraConfig("render_camera", pose, 128, 128, 1, 0.01, 100)
+        elif self.render_camera == "base_camera":
+            return self._default_sensor_configs
+        else:
+            raise ValueError(f"Unsupported render camera: {self.render_camera}")
 
     def _load_scene(self, options: dict):
         self.cube_half_size = common.to_tensor([0.02] * 3)

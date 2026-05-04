@@ -55,12 +55,13 @@ Example usage:
 
 python inest_irl/dataset_utils/h5_to_dataset.py
     --h5_path ../data/maniskill/StackPyramid-v1_data.../trajectory...h5
-    --dataset_path ../data/inest-maniskill/dataset...
+    --dataset_path ../data/inest-maniskill/datasets/dataset...
+    [--only_extract_subgoals]
 
 # for negative trajs
 python inest_irl/dataset_utils/h5_to_dataset.py
     --h5_path ../data/inest-maniskill/experiments_data-trajs/tajs_.../trajectory...h5
-    --dataset_path ../data/inest-maniskill/experiments_data-trajs/dataset...
+    --dataset_path ../data/inest-maniskill/experiments_data-trajs/datasets/dataset...
     --config inest_irl/dataset_utils/configs_h5_to_dataset/sb3-sac_trajs.yaml
 """
 
@@ -112,7 +113,6 @@ def handle_traj(group, path, idx, obs_key, action_keys, robot_state_keys, object
   _save_data_as_json(group, action_keys, None, path, idx)
   _save_data_as_json(group, robot_state_keys, 'robot', path, idx)
   _save_data_as_json(group, objects_state_keys, 'objects', path, idx)
-
 
 
 def main(args):
@@ -167,7 +167,8 @@ def main(args):
     os.makedirs(traj_path, exist_ok=True)
 
     # handle trajectory data
-    handle_traj(traj_group, traj_path, traj_idx, obs_key, action_keys, robot_state_keys, objects_state_keys)
+    if not args.only_extract_subgoals:
+      handle_traj(traj_group, traj_path, traj_idx, obs_key, action_keys, robot_state_keys, objects_state_keys)
     
     try:
       subgoal_data[int(traj_idx)] = np.array(_access_nested_group(traj_group, 'obs/extra/subgoal')).tolist()
@@ -182,7 +183,7 @@ def main(args):
     for traj_idx, subgoals in subgoal_data.items():
       subgoal_idxs[traj_idx] = []
       for t, subgoal in enumerate(subgoals):
-        if subgoal > len(subgoal_idxs[traj_idx]):
+        if subgoal[0] > len(subgoal_idxs[traj_idx]):    # subgoal will be wrapped in list, so subgoal[0] is the actual subgoal value
           subgoal_idxs[traj_idx].append(t)
           
     subgoals_path = os.path.join(args.dataset_path, 'subgoal_frames.json')
@@ -211,6 +212,8 @@ if __name__ == '__main__':
                         help='Path to the configuration yaml file')
   arg_pars.add_argument('--random_seed', type=int, default=22,
                         help='Random seed for reproducibility')
+  arg_pars.add_argument('--only_extract_subgoals', action='store_true',
+                        help='If set, only extract subgoal frames and save as json, without creating the dataset folders and files')
   args = arg_pars.parse_args()
 
   main(args)

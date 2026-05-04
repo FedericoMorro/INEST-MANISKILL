@@ -11,6 +11,16 @@ python inest_irl/dataset_utils/h5_analyzer.py
     [--no_plot_all_rew]
 	[--output_path out]
 	[--subgoals path/to/subgoal/otherwise/search/data/folder]
+ 
+ 
+# for video saving (with subgoal overlay if subgoal data is provided):
+
+python inest_irl/dataset_utils/h5_analyzer.py
+	../data/maniskill/StackPyramid-v1_.../trajectory...h5
+	--vis
+	--output_path ../data/inest-maniskill/videos/video-...
+	[--subgoals ../data/inest-maniskill/datasets/dataset.../subgoal_frames.json]
+
 """
 
 import argparse
@@ -387,8 +397,8 @@ if __name__ == "__main__":
     if not os.path.exists(args.output_path):
         os.makedirs(args.output_path, exist_ok=True)
 
-    subgoals_path = None
-    if args.subgoals is None:
+    subgoals_path = args.subgoals
+    if subgoals_path is None:
         # check if in same folder as h5 file
         dir_name = os.path.dirname(args.filepath)
         expected_path = os.path.join(dir_name, "subgoal_frames.json")
