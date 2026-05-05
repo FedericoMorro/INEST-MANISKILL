@@ -32,7 +32,7 @@ from tqdm.rich import tqdm as rich_tqdm
 from xirl import common
 import wandb
 
-from configs import validate_config
+#from configs import validate_config
 from inest_irl.utils.utils import setup_experiment
 from inest_irl.utils.loggers import CSVLogger
 

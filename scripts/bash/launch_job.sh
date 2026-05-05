@@ -33,7 +33,7 @@ manage_existing_exp_folder() {
     fi
 }
 
-manage_existing_scratch_flash_folder() {
+manage_scratch_flash_folder() {
     SCRATCH_FLASH_DATASET_PATH="$1"
     DATASET_PATH="$2"
     EXPERIMENT_NAME="$3"
@@ -43,14 +43,29 @@ manage_existing_scratch_flash_folder() {
         echo "Directory ${SCRATCH_FLASH_DATASET_PATH} already exists on SCRATCH_FLASH."
         read -p "Do you want to perform copy anyway (y/N)? [y/N]: " choice
         case "$choice" in
-            y|Y ) echo "Copying dataset to SCRATCH_FLASH for faster access during training...";
-                TO_BE_COPIED=$(rsync -avh --dry-run ${DATASET_PATH} ${SCRATCH_FLASH}/ | grep -v "/$" | wc -l);
-                echo "Progress: cat ${HOME}/logs/rsync_${EXPERIMENT_NAME}_pretrain_${QUEUE_TIME}.log | grep -v '/$' | wc -l | awk -v total=$TO_BE_COPIED '{printf(\"%.2f%%\\n\", (\$1/total)*100)}'";
-                echo "This may take a while...";
-                rsync -avzh ${DATASET_PATH} ${SCRATCH_FLASH} > ${HOME}/logs/rsync_${EXPERIMENT_NAME}_pretrain.log 2>&1;;
+            y|Y ) echo "Performing copy...";;
             * ) echo "Skipping copy..."; return;;
         esac
     fi
+
+    echo "Copying dataset to SCRATCH_FLASH for faster access during training..."
+    TO_BE_COPIED=$(rsync -avh --dry-run ${DATASET_PATH} ${SCRATCH_FLASH}/ | grep -v "/$" | wc -l)
+    #echo "To track the copy progress, run the following command in another terminal:"
+    #echo "cat ${HOME}/logs/rsync_${EXPERIMENT_NAME}_pretrain_${QUEUE_TIME}.log | grep -v '/$' | wc -l | awk -v total=$TO_BE_COPIED '{printf(\"%.2f%%\\n\", (\$1/total)*100)}'"
+    #echo "This may take a while..."
+    #rsync -avzh ${DATASET_PATH} ${SCRATCH_FLASH} > ${HOME}/logs/rsync_${EXPERIMENT_NAME}_pretrain_${QUEUE_TIME}.log 2>&1
+
+    CHECKPOINT_NUM_FILES=$(TO_BE_COPIED / 10)   # check every 10%
+
+    echo "Compressing input dataset for faster copying..."
+    tar -czf --checkpoint=${CHECKPOINT_NUM_FILES} ${DATASET_PATH}.tar.gz -C $(dirname ${DATASET_PATH}) $(basename ${DATASET_PATH})
+    echo "Copying compressed dataset to SCRATCH_FLASH..."
+    rsync -avzh --progress ${DATASET_PATH}.tar.gz ${SCRATCH_FLASH_DATASET_PATH}.tar.gz
+    echo "Extracting dataset on SCRATCH_FLASH..."
+    tar -xzf --checkpoint=${CHECKPOINT_NUM_FILES} ${SCRATCH_FLASH_DATASET_PATH}.tar.gz -C $(dirname ${SCRATCH_FLASH_DATASET_PATH})
+    echo "If you want to clean up the compressed files, run the following commands:"
+    echo "rm ${DATASET_PATH}.tar.gz"
+    echo "rm ${SCRATCH_FLASH_DATASET_PATH}.tar.gz"
 }
 
 
@@ -90,17 +105,17 @@ if [[ "$1" == "rl" ]]; then
 elif [[ "$1" == "pretrain" || "$1" == "opt-pretrain" ]]; then
     echo "Submitting INEST MANISKILL pretraining job..."
 
-    DATASET_PATH="/home/fmorro/data/inest-maniskill/dataset-rc-1000-states"
+    DATASET_PATH="/home/fmorro/data/inest-maniskill/dataset-bc-1000-states"
 
-    # copy dataset to SCRATCH_FLASH for faster access during training
+    # copy dataset to SCRATCH_FLASH for faster access during training (if already present ask user)
     export SCRATCH_FLASH_DATASET_PATH="${SCRATCH_FLASH}/$(basename ${DATASET_PATH})"
-    manage_existing_scratch_flash_folder "${SCRATCH_FLASH_DATASET_PATH}" "${DATASET_PATH}" "${EXPERIMENT_NAME}"
+    manage_scratch_flash_folder "${SCRATCH_FLASH_DATASET_PATH}" "${DATASET_PATH}" "${EXPERIMENT_NAME}"
     echo "Dataset path: ${SCRATCH_FLASH_DATASET_PATH}"
 
 
     if [[ "$1" == "pretrain" ]]; then
 
-        export BATCH_SIZE="32"
+        export BATCH_SIZE="16"
         export TRAIN_MAX_ITERS="10_000"
         export NUM_FRAMES_PER_SEQUENCE="50"
 
@@ -131,7 +146,7 @@ elif [[ "$1" == "pretrain" || "$1" == "opt-pretrain" ]]; then
             --mem=32GB \
             --mail-type=ALL \
             --mail-user=federico.morro@polito.it \
-            --partition=gpu_a40 \
+            --partition=gpu_a40_ext \
             --gres=gpu:1 \
             --output=${HOME}/logs/%j_${EXPERIMENT_NAME}_opt-pretrain.out \
             --error=${HOME}/logs/%j_${EXPERIMENT_NAME}_opt-pretrain.err \

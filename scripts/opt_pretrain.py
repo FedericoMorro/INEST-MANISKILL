@@ -15,7 +15,7 @@ import numpy as np
 import optuna
 import yaml
 
-from inest_irl.utils.csv_logger import CSVLogger
+from inest_irl.utils.loggers import CSVLogger
 
 
 FLAGS = flags.FLAGS
@@ -41,7 +41,7 @@ flags.DEFINE_boolean("overwrite", False, "Whether to overwrite existing experime
 
 #flags.DEFINE_integer("epochs_min", 50, "Lower bound for epochs.")
 #flags.DEFINE_integer("epochs_max", 400, "Upper bound for epochs.")
-flags.DEFINE_integer("epochs_step", 25, "Epoch step.")
+#flags.DEFINE_integer("epochs_step", 25, "Epoch step.")
 flags.DEFINE_integer("batch_size_min", 4, "Lower bound power-of-two batch size.")
 flags.DEFINE_integer("batch_size_max", 16, "Upper bound power-of-two batch size.")
 flags.DEFINE_float("learning_rate_min", 1e-6, "Lower log-uniform bound.")
@@ -100,7 +100,7 @@ def _objective(train_script: str, out_dir: str, batch_choices: List[int], emb_si
         }
         
         print(f"[TRIAL {trial.number}] Starting trial with params: {params}")
-        curr_exp_name = f"{FLAGS.experiment_name}_trial-{trial.number:04d}"
+        curr_exp_name = f"{FLAGS.experiment_name}_{trial.number:03d}_b{params['batch_size']}_lr{params['learning_rate']:.0e}_wd{params['weight_decay']:.0e}_e{params['embedding_size']}"
         cmd = [
             sys.executable,
             train_script,
