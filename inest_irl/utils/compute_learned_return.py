@@ -3,18 +3,18 @@
 """
 Example usage:
 
-python inest_irl/utils/eval_return.py
+python inest_irl/utils/compute_learned_return.py
     --experiment_path ../data/inest-maniskill/_experiments/pretrain/render-cam/
     [--cache_only]
-    [--data_root ../data/inest-maniskill/dataset-rc-1000-states]
+    [--data_root ../data/inest-maniskill/datasets/dataset-rc-1000-states]
     [--plot_subgoal_dists]
 
 
 # for different trajs
-python inest_irl/utils/eval_return.py
+python inest_irl/utils/compute_learned_return.py
     --experiment_path ../data/inest-maniskill/_experiments/pretrain/render-cam/
     --diff_trajs_dataset ../data/inest-maniskill/different-trajs/
-    [--data_root ../data/inest-maniskill/dataset-rc-1000-states]
+    [--data_root ../data/inest-maniskill/datasets/dataset-rc-1000-states]
 """
 
 import os
@@ -22,6 +22,7 @@ import typing
 from pathlib import Path
 
 import argparse
+from collections import defaultdict
 import json
 import matplotlib.pyplot as plt
 import numpy as np
@@ -256,6 +257,127 @@ def compute_reward_signals(model, valid_loader, goal_emb, subgoal_embs, dist_sca
           subgoal_reachs[i].append(reach_step)
 
   return rewards, traj_ids, subgoal_rewards, subgoal_dists, subgoal_reachs, subgoal_reachs_gt
+
+
+def compute_reward_metrics(rewards: np.array) -> dict[str, float]:
+  if len(rewards) == 0:
+    return {}
+  
+  metrics = {
+    'final_value': float(rewards[-1]),
+    'cumulative': float(np.sum(rewards)),
+    'mean': float(np.mean(rewards)),
+    'stdev': float(np.std(rewards)),
+    'min': float(np.min(rewards)),
+    'max': float(np.max(rewards)),
+    'range': float(np.max(rewards) - np.min(rewards))
+  }
+  
+  # smoothness: variance of first differences (lower -> smoother)
+  first_diff = np.diff(rewards)
+  metrics['smoothness'] = float(np.var(first_diff))
+  metrics['mean_abs_change'] = float(np.mean(np.abs(first_diff)))
+  
+  # monotonicity: fraction of steps where reward increases
+  increases = np.sum(first_diff > 0)
+  metrics['monotonicity'] = float(increases / len(first_diff))
+  metrics['is_monotone_increasing'] = bool(np.all(first_diff >= 0))
+  
+  # trend: linear regression slope
+  x = np.arange(len(rewards))
+  coeffs = np.polyfit(x, rewards, deg=1)
+  metrics['trend_slope'] = float(coeffs[0])
+  
+  # reward improvement final-initial
+  metrics['improvement'] = float(rewards[-1] - rewards[0])
+  
+  return metrics
+
+def compute_avg_reward_metrics(all_rewards: list[np.array]) -> dict[str, float]:
+  all_metrics = [compute_reward_metrics(rew) for rew in all_rewards]
+  
+  # aggregate each metric across trajectories
+  avg_metrics = {}
+  for key in all_metrics[0].keys():
+    values = [m[key] for m in all_metrics if key in m]
+    avg_metrics[key] = float(np.mean(values)) if len(values) > 0 else float('nan')
+  
+  return avg_metrics
+
+def save_reward_metrics(rewards: np.array, output_file: str, avg: bool = False, traj_ids: list[str] = None):
+  # if avg, compute avg metrics across trajs and save single dict
+  if avg:
+    metrics = compute_avg_reward_metrics(rewards)
+    with open(output_file, 'w') as f:
+      json.dump(metrics, f, indent=2)
+    return
+    
+  # otherwise compute metrics for each traj and save dict of dicts
+  metrics_dict = {}  
+  for i, rew in enumerate(rewards):
+    traj_id = traj_ids[i] if traj_ids is not None and i < len(traj_ids) else f"#{i}"
+    metrics_dict[traj_id] = compute_reward_metrics(rew)
+    
+  with open(output_file, 'w') as f:
+    json.dump(sorted(metrics_dict.items(), key=lambda x: x[0]), f, indent=2)
+    
+    
+def save_subgoal_idxs(subgoal_reachs, traj_ids, output_file, subgoal_reachs_gt=None):
+  # convert from list of subgoal reaching idxs to dict with traj_id keys, computing cumulative counts for each subgoal
+  def _to_dict(subgoal_reachs, traj_ids):
+    traj_subgoal_idxs = defaultdict(list)
+    cum_subgoal_count = defaultdict(int)
+    
+    for subgoal_idx, subgoal_steps in enumerate(subgoal_reachs):
+      for i, subgoal_step in enumerate(subgoal_steps):
+        traj_id = traj_ids[i] if i < len(traj_ids) else f"#{i}"
+        traj_subgoal_idxs[traj_id].append(subgoal_step if not np.isnan(subgoal_step) else None)
+        cum_subgoal_count[subgoal_idx] += 1
+        
+    cum_subgoal_count["num_trajs"] = len(traj_ids) if traj_ids is not None else i+1
+        
+    return traj_subgoal_idxs, cum_subgoal_count
+  
+  traj_subgoal_idxs, cum_subgoal_count = _to_dict(subgoal_reachs, traj_ids)
+  traj_subgoal_idxs_gt, cum_subgoal_count_gt = _to_dict(subgoal_reachs_gt, traj_ids) if subgoal_reachs_gt is not None else None
+  
+  # compute avg difference in reaching steps between GT and detected subgoals
+  if subgoal_reachs_gt is not None:
+    avg_step_diffs = defaultdict(float)
+    for traj_idx in traj_subgoal_idxs:
+      detected_steps = traj_subgoal_idxs[traj_idx]
+      gt_steps = traj_subgoal_idxs_gt[traj_idx] if traj_idx in traj_subgoal_idxs_gt else [None] * len(detected_steps)
+      
+      for i, (d, gt) in enumerate(zip(detected_steps, gt_steps)):
+        if d is not None and gt is not None:
+          avg_step_diffs[i] += abs(d - gt)
+          avg_step_diffs[f"cnt_{i}"] += 1
+    
+    # compute averages after accumulating all differences
+    for i in range(len(subgoal_reachs)):
+      if avg_step_diffs[f"cnt_{i}"] > 0:
+        avg_step_diffs[i] = avg_step_diffs[i] / int(avg_step_diffs[f"cnt_{i}"])
+      else:
+        avg_step_diffs[i] = None  # no data to compute avg step difference for this subgoal
+        avg_step_diffs[f"cnt_{i}"] = 0
+          
+  else:
+    avg_step_diffs = None
+  
+  # append cumulative counts, then per-traj detected and GT subgoal reaching steps in a dict and save as json
+  out_data = {
+    "cumulative_subgoal_count": cum_subgoal_count,
+    "cumulative_subgoal_count_gt": cum_subgoal_count_gt,
+    "avg_step_diffs": avg_step_diffs,
+  }
+  for traj_id, subgoal_steps in sorted(traj_subgoal_idxs.items(), key=lambda x: x[0]):
+    out_data[traj_id] = {
+      "detected": subgoal_steps,
+      "gt": traj_subgoal_idxs_gt[traj_id] if traj_subgoal_idxs_gt is not None and traj_id in traj_subgoal_idxs_gt else None
+    }
+    
+  with open(output_file, 'w') as f:
+    json.dump(out_data, f, indent=2)
 
 
 def pad_trajectories(rewards):
@@ -606,13 +728,16 @@ def main(args):
   _, lengths = pad_trajectories(rewards)
   plot_trajectory_lengths(lengths, out_dir)
   
-  # plot mean results
+  # plot mean results, and save avg reward metrics
   plot_mean_results(rewards, out_dir, None, label="Learned Reward")
+  save_reward_metrics(rewards, os.path.join(out_dir, 'reward_metrics.json'), avg=True)
   
-  # plot subgoal mean rewards and distances
+  # plot subgoal mean rewards and distances, and save avg subgoal reward metrics
   if subgoal_rewards is not None:
     plot_mean_results(subgoal_rewards, out_dir, subgoal_reachs, label="Learned Subgoal Reward", 
                      subgoal_reachs_gt=subgoal_reachs_gt, show_intersection=False)
+    save_reward_metrics(subgoal_rewards, os.path.join(out_dir, 'subgoal_reward_metrics.json'), avg=True)
+    
     for i, subgoal_dist in enumerate(subgoal_dists):
       # For distance plots, plot both GT and detected with intersection data
       plot_mean_results(subgoal_dist, out_dir, [subgoal_reachs[i]] if subgoal_reachs else None, 
@@ -620,32 +745,28 @@ def main(args):
                        subgoal_reachs_gt=[subgoal_reachs_gt[i]] if subgoal_reachs_gt else None,
                        show_intersection=True)
     
-    # save .txt with per trajectory subgoal reaching timesteps
-    traj_substep = []
-    for subgoal_idx, subgoal_steps in enumerate(subgoal_reachs):
-      for traj_idx, subgoal_step in enumerate(subgoal_steps):
-        if len(traj_substep) < traj_idx + 1:
-          traj_substep.append([])
-        else:
-          traj_substep[traj_idx].append(subgoal_step)
-
-    with open(os.path.join(out_dir, 'sub_reach_times.txt'), 'w') as f:
-      f.write("Trajectory ID: Subgoal i-th reaching timesteps (NaN if not reached)\n")
-      for i, ts in enumerate(traj_substep):
-        f.write(f"{i:>4.0f}: " + ", ".join([f"{t:3.0f}" for t in ts]) + "\n")
+    # save .json with detected and GT subgoal reaching timesteps for each trajectory
+    save_subgoal_idxs(subgoal_reachs, traj_ids, os.path.join(out_dir, 'subgoal_idxs.json'), subgoal_reachs_gt=subgoal_reachs_gt)
     
     
-  # plot trajectory-wise curves
+  # plot trajectory-wise curves, and save per-trajectory reward metrics
   if not args.no_plot_trajs:
-    # save one trajectory plot per eval sample (or up to count)
     plot_trajectory_samples(rewards, traj_ids, trajs_out_dir, None, label="Learned Reward", count=args.count)
+  else:
+    print("Skipping trajectory-wise plots for learned rewards (no_plot_trajs flag is set)")
+  
+  save_reward_metrics(rewards, os.path.join(out_dir, 'reward_metrics_per_traj.json'), avg=False, traj_ids=traj_ids)
   
   if subgoal_rewards is not None:
-    # plot for traj samples
-    if not args.no_plot_subgoal_trajs: 
+    # plot for traj samples, and save per-trajectory subgoal reward metrics
+    if not args.no_plot_subgoal_trajs:
       plot_trajectory_samples(subgoal_rewards, traj_ids, trajs_out_dir, subgoal_reachs, 
-                             label="Learned Subgoal Reward", count=args.count, 
-                             subgoal_reachs_gt=subgoal_reachs_gt, show_intersection=False)
+                              label="Learned Subgoal Reward", count=args.count, 
+                              subgoal_reachs_gt=subgoal_reachs_gt, show_intersection=False)
+    else:
+      print("Skipping trajectory-wise plots for subgoal rewards (no_plot_subgoal_trajs flag is set)")
+    
+    save_reward_metrics(subgoal_rewards, os.path.join(out_dir, 'subgoal_reward_metrics_per_traj.json'), avg=False, traj_ids=traj_ids)
 
     if args.plot_subgoal_dists:
       for i, subgoal_dist in enumerate(subgoal_dists):

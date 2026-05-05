@@ -50,6 +50,8 @@ flags.DEFINE_float("weight_decay_min", 1e-6, "Lower log-uniform bound.")
 flags.DEFINE_float("weight_decay_max", 1e-3, "Upper log-uniform bound.")
 flags.DEFINE_integer("emb_size_min", 32, "Lower bound for model embedding size.")
 flags.DEFINE_integer("emb_size_max", 256, "Upper bound for model embedding size.")
+flags.DEFINE_bool("sweep_emb_norm", True, "Whether to sweep embedding normalization (True/False).")
+flags.DEFINE_integer("num_frames_per_sequence", 40, "Number of frames per sequence for training (fixed, not swept).")
 
 flags.DEFINE_bool("continue_on_trial_failure", True,
     "If True, continue study when a trial raises RuntimeError/IO/schema errors; failed trial is recorded by Optuna.")
@@ -99,8 +101,12 @@ def _objective(train_script: str, out_dir: str, batch_choices: List[int], emb_si
             "embedding_size": trial.suggest_categorical("embedding_size", emb_size_choices),
         }
         
+        if FLAGS.sweep_emb_norm:
+            norm_choice = trial.suggest_categorical("embedding_normalization", [True, False])
+            params["embedding_normalization"] = norm_choice
+        
         print(f"[TRIAL {trial.number}] Starting trial with params: {params}")
-        curr_exp_name = f"{FLAGS.experiment_name}_{trial.number:03d}_b{params['batch_size']}_lr{params['learning_rate']:.0e}_wd{params['weight_decay']:.0e}_e{params['embedding_size']}"
+        curr_exp_name = f"{FLAGS.experiment_name}-{trial.number:03d}"
         cmd = [
             sys.executable,
             train_script,
@@ -114,7 +120,8 @@ def _objective(train_script: str, out_dir: str, batch_choices: List[int], emb_si
             f"--config.optim.lr={params['learning_rate']}",
             f"--config.optim.weight_decay={params['weight_decay']}",
             f"--config.model.embedding_size={params['embedding_size']}",
-            f"--config.frame_sampler.num_frames_per_sequence=40",
+            f"--config.model.normalize_embeddings={params.get('embedding_normalization', False)}",
+            f"--config.frame_sampler.num_frames_per_sequence={FLAGS.num_frames_per_sequence}",
         ]
         if FLAGS.wandb:
             cmd.extend(
