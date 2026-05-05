@@ -23,6 +23,7 @@ from absl import flags
 from absl import logging
 import copy
 from ml_collections import config_flags
+import numpy as np
 import torch
 from torchkit import CheckpointManager
 from torchkit import experiment
@@ -33,8 +34,9 @@ from xirl import common
 import wandb
 
 #from configs import validate_config
-from inest_irl.utils.utils import setup_experiment
+from inest_irl.utils.compute_learned_return import compute_avg_reward_metrics
 from inest_irl.utils.loggers import CSVLogger
+from inest_irl.utils.utils import setup_experiment
 
 # pylint: disable=logging-fstring-interpolation
 
@@ -56,6 +58,38 @@ config_flags.DEFINE_config_file(
     "File path to the training hyperparameter configuration.",
 )
 
+
+class RewardMetricsEvaluator:
+  def __init__(self):
+    pass
+  
+  # inspired by: xirl/evaluators/reward_visualizer.py + inest_irl/utils/compute_learned_return.py
+  def _compute_goal_emb(self, outs):
+    embs = [out.embs for out in outs]
+    goal_embs = [emb[-1, :] for emb in embs]
+    goal_embs = np.stack(goal_embs, axis=0)
+    self.goal_emb = np.mean(goal_embs, axis=0, keepdims=True)
+    
+    init_embs = [emb[0, :] for emb in embs]
+    init_embs = np.stack(init_embs, axis=0)
+    dist_to_goal = np.linalg.norm(init_embs - self.goal_emb, axis=1).mean()
+    self.dist_scale = 1.0 / (dist_to_goal + 1e-8)
+  
+  # inspired by: inest_irl/utils/compute_learned_return.py
+  def _compute_reward_metrics(self, outs):
+    embs = [out.embs for out in outs]
+    
+    rewards = []
+    for emb in embs:
+      dists = np.linalg.norm(self.goal_emb - emb, axis=1)
+      rewards.append(- dists * self.dist_scale)
+    
+    return compute_avg_reward_metrics(rewards)
+  
+  def evaluate(self, train_outs, valid_outs):
+    self._compute_goal_emb(train_outs)
+    return self._compute_reward_metrics(valid_outs)
+    
 
 @app.run
 def main(_):
@@ -98,6 +132,10 @@ def main(_):
   logger = Logger(osp.join(exp_dir, "tb"), FLAGS.resume)
   eval_logger = CSVLogger(osp.join(exp_dir, "eval_log.csv"))
   eval_logger.init_logging(["epoch", "step", "loss", "kendalls_tau"])
+  eval_rew_logger = CSVLogger(osp.join(exp_dir, "eval_rew_log.csv"))
+  #* init_logging will be done before first log call
+  
+  reward_metrics_evaluator = RewardMetricsEvaluator()
   
   # set num_frames_per_sequence to max number of frames in a video sequence in the dataset if None
   if config.frame_sampler.num_frames_per_sequence < 0:
@@ -169,13 +207,16 @@ def main(_):
           })
               
           # Evaluate the model on the downstream datasets.
+          outs_buffer = {}
           for split, downstream_loader in downstream_loaders.items():
-            eval_to_metric = eval_manager.evaluate(
+            eval_to_metric, downstream_outputs = eval_manager.evaluate(
                 model,
                 downstream_loader,
                 device,
                 config.eval.val_iters,
-            )
+            ) # downstream_outputs dict = class -> list of model outputs, with len=eval_iters
+            outs_buffer[split] = list(downstream_outputs.values())[0]   #! only one class supported
+            
             for eval_name, eval_out in eval_to_metric.items():
               eval_out.log(
                   logger,
@@ -187,13 +228,23 @@ def main(_):
                 eval_out.log_wandb(
                     wandb, global_step, eval_name, f"downstream_{split}"
                 )
-              #! does not work for now  
-              if split == "valid" and eval_name == "kendalls_tau/scalar_mean":
+              if split == "valid" and eval_name == "kendalls_tau":
                 eval_logger.log({
-                    "kendalls_tau": eval_out.value,
+                    "kendalls_tau": eval_out.scalar[0],
                 })
-          
           eval_logger.flush()
+          
+          # handle reward metrics evaluation and logging
+          reward_metrics = reward_metrics_evaluator.evaluate(outs_buffer["train"], outs_buffer["valid"])
+          
+          if FLAGS.wandb:
+            wandb.log({f"reward_metrics/{k}": v for k, v in reward_metrics.items()}, step=global_step)
+            
+          reward_metrics["epoch"] = epoch
+          reward_metrics["step"] = global_step  
+          if not eval_rew_logger.is_initialized:
+            eval_rew_logger.init_logging(reward_metrics.keys())
+          eval_rew_logger.log_and_flush(reward_metrics)
               
         # Save model checkpoint.
         if not global_step % config.checkpointing_frequency:

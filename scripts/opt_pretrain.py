@@ -51,15 +51,17 @@ flags.DEFINE_float("weight_decay_max", 1e-3, "Upper log-uniform bound.")
 flags.DEFINE_integer("emb_size_min", 32, "Lower bound for model embedding size.")
 flags.DEFINE_integer("emb_size_max", 256, "Upper bound for model embedding size.")
 flags.DEFINE_bool("sweep_emb_norm", True, "Whether to sweep embedding normalization (True/False).")
-flags.DEFINE_integer("num_frames_per_sequence", 40, "Number of frames per sequence for training (fixed, not swept).")
+flags.DEFINE_int("num_frames_per_sequence", 40, "Number of frames per sequence for training and evaluation.")
 
 flags.DEFINE_bool("continue_on_trial_failure", True,
     "If True, continue study when a trial raises RuntimeError/IO/schema errors; failed trial is recorded by Optuna.")
 
 flags.DEFINE_bool("enable_pruning", True,
     "Enable Optuna pruning by polling eval_loss from eval_log.csv during training.")
-flags.DEFINE_integer("prune_check_interval", 30,
+flags.DEFINE_integer("prune_check_interval", 120,
     "Seconds between pruning checks when --enable_pruning is True.")
+flags.DEFINE_float("prune_warmup_steps", 2500,
+    "Number of steps to skip before allowing pruning decisions, to avoid pruning too early based on noisy initial losses.")
 
 
 def _is_power_of_two(x: int) -> bool:
@@ -88,6 +90,11 @@ def _read_log_excerpt(log_path: str, max_chars: int = 5000) -> str:
 
 def _objective(train_script: str, out_dir: str, batch_choices: List[int], emb_size_choices: List[int]):
     
+    def _compute_obj(monotonicity, smoothness, is_mon_incr):
+        # score combination of final validation loss and stdev of validation loss of last 2k steps
+        objective_val = monotonicity - 10 * smoothness + 0.1 * is_mon_incr
+        return objective_val, {"objective_val": objective_val, "monotonicity": monotonicity, "smoothness": smoothness, "is_monotone_increasing": is_mon_incr}
+    
     def _run(trial: optuna.trial.Trial) -> float:
         params: Dict[str, object] = {
             #"epochs": trial.suggest_int("epochs", FLAGS.epochs_min, FLAGS.epochs_max, step=FLAGS.epochs_step),
@@ -102,11 +109,10 @@ def _objective(train_script: str, out_dir: str, batch_choices: List[int], emb_si
         }
         
         if FLAGS.sweep_emb_norm:
-            norm_choice = trial.suggest_categorical("embedding_normalization", [True, False])
-            params["embedding_normalization"] = norm_choice
+            params["normalize_embeddings"] = trial.suggest_categorical("normalize_embeddings", [True, False])
         
         print(f"[TRIAL {trial.number}] Starting trial with params: {params}")
-        curr_exp_name = f"{FLAGS.experiment_name}-{trial.number:03d}"
+        curr_exp_name = f"{FLAGS.experiment_name}_{trial.number:03d}"
         cmd = [
             sys.executable,
             train_script,
@@ -120,7 +126,7 @@ def _objective(train_script: str, out_dir: str, batch_choices: List[int], emb_si
             f"--config.optim.lr={params['learning_rate']}",
             f"--config.optim.weight_decay={params['weight_decay']}",
             f"--config.model.embedding_size={params['embedding_size']}",
-            f"--config.model.normalize_embeddings={params.get('embedding_normalization', False)}",
+            f"--config.model.normalize_embeddings={params.get('normalize_embeddings', False)}",
             f"--config.frame_sampler.num_frames_per_sequence={FLAGS.num_frames_per_sequence}",
         ]
         if FLAGS.wandb:
@@ -133,33 +139,46 @@ def _objective(train_script: str, out_dir: str, batch_choices: List[int], emb_si
 
         trial_out = os.path.join(out_dir, f"{curr_exp_name}")
         trial_log_path = os.path.join(trial_out, "trial_stdout_stderr.log")
-        eval_csv_path = os.path.join(trial_out, "eval_log.csv")
+        eval_rew_csv_path = os.path.join(trial_out, "eval_rew_log.csv")
         os.makedirs(trial_out, exist_ok=True)
         
         # launch training as subprocess so we can poll for pruning
         with open(trial_log_path, "w", encoding="utf-8") as logf:
             proc = subprocess.Popen(cmd, stdout=logf, stderr=subprocess.STDOUT)
         
-        # poll eval_log.csv and report loss to Optuna for pruning decisions
+        # poll eval_rew_log.csv and report loss to Optuna for pruning decisions
         last_reported_step = -1
         while proc.poll() is None:
             try:
-                logger = CSVLogger(eval_csv_path)
-                latest_loss = logger.get_latest_value("loss", float)
+                logger = CSVLogger(eval_rew_csv_path)
                 latest_step = logger.get_latest_value("step", int)
-                if latest_loss is not None and latest_step is not None:
-                    # only report when step advances
-                    if latest_step > last_reported_step:
-                        last_reported_step = latest_step
-                        trial.report(latest_loss, latest_step)
-                        if FLAGS.enable_pruning and trial.should_prune():
-                            proc.terminate()
-                            try:
-                                proc.wait(timeout=10)
-                            except subprocess.TimeoutExpired:
-                                proc.kill()
-                                proc.wait()
-                            raise optuna.exceptions.TrialPruned()
+                
+                if latest_step <= FLAGS.prune_warmup_steps:
+                    continue  # skip pruning checks during warmup period
+                
+                latest_step = logger.get_latest_value("step", int)
+                eval_monotonicity = logger.get_latest_value("monotonicity", float)
+                eval_smoothness = logger.get_latest_value("smoothness", float)
+                eval_is_mon_incr = logger.get_latest_value("is_monotonic_increasing", float)
+                
+                if not eval_monotonicity:
+                    continue  # no data yet
+                
+                # only report when step advances
+                if latest_step > last_reported_step:
+                    last_reported_step = latest_step
+                    objective_val, _ = _compute_obj(eval_monotonicity, eval_smoothness, eval_is_mon_incr)
+                    trial.report(objective_val, latest_step)
+                    
+                    if FLAGS.enable_pruning and trial.should_prune():
+                        proc.terminate()
+                        try:
+                            proc.wait(timeout=10)
+                        except subprocess.TimeoutExpired:
+                            proc.kill()
+                            proc.wait()
+                        raise optuna.exceptions.TrialPruned()
+                    
             except FileNotFoundError:
                 # eval_log.csv not created yet; keep polling.
                 pass
@@ -177,18 +196,15 @@ def _objective(train_script: str, out_dir: str, batch_choices: List[int], emb_si
             )
             
         # read final metrics from eval CSV.
-        eval_csv = CSVLogger(eval_csv_path)
-        eval_steps = eval_csv.get_field_data("step", int)
-        eval_loss = eval_csv.get_field_data("loss", float)
+        eval_csv = CSVLogger(eval_rew_csv_path)
+        eval_monotonicity = eval_csv.get_latest_value("monotonicity", float)
+        eval_smoothness = eval_csv.get_latest_value("smoothness", float)
+        eval_is_mon_incr = eval_csv.get_latest_value("is_monotonic_increasing", float)
         
-        # score combination of final validation loss and stdev of validation loss of last 2k steps
-        filtered_losses = [l for s, l in zip(eval_steps, eval_loss) if s >= eval_steps[-1] - 2000]
-        loss_std = np.std(filtered_losses)
-        objective_val = 0.8 * eval_loss[-1] + 0.2 * loss_std
+        objective_val, obj_info = _compute_obj(eval_monotonicity, eval_smoothness, eval_is_mon_incr)
         
-        trial.set_user_attr("final_val_loss", eval_loss[-1])
-        trial.set_user_attr("val_loss_std_last_2k_steps", loss_std)
-        trial.set_user_attr("objective_val", objective_val)
+        for key in obj_info:
+            trial.set_user_attr(key, obj_info[key])
         trial.set_user_attr("trial_output_path", trial_out)
         
         return objective_val

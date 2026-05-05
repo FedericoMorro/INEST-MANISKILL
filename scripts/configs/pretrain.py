@@ -79,7 +79,7 @@ def get_config():
   # This controls the type of sampling we perform on video frames.
   config.frame_sampler.strategy = "uniform"
   # The number of frames to sample per video.
-  config.frame_sampler.num_frames_per_sequence = -1 #20
+  config.frame_sampler.num_frames_per_sequence = 40
   #   if < 0, set to maximum number of frames in a video sequence in the dataset
   # The number of context frames to sample per frame. This is useful for
   # models that use 3D convolutions.

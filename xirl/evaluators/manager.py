@@ -101,4 +101,4 @@ class EvalManager:
           metrics.append(evaluator.evaluate(outs))
         metric = EvaluatorOutput.merge(metrics)
       eval_to_metric[evaluator_name] = metric
-    return eval_to_metric
+    return eval_to_metric, downstream_outputs
