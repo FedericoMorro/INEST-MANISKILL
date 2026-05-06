@@ -74,7 +74,7 @@ if [[ "$1" == "rl" ]]; then
 
     export REWARD_WRAPPER_TYPE="goal_dist"
     export REWARD_SCALING="1.0"
-    export ENV_RANDOMIZATION="default"
+    export ENV_RANDOMIZATION="same-seed"
     export REPLAY_BUFFER_CAPACITY="1_000_000"
     export ACTOR_LR="3e-4"
     export CRITIC_LR="1e-4"
@@ -83,7 +83,7 @@ if [[ "$1" == "rl" ]]; then
     export TARGET_ENTROPY="-3.5"
     export STD_ACTION_NOISE="0.0"
     export ANNEAL_TARGET_ENTROPY="False"
-    export REWARD_WRAPPER_PRETRAINED_PATH="/home/fmorro/INEST-MANISKILL/experiments/pretrain/rcs1k_fr50_b16/"
+    export REWARD_WRAPPER_PRETRAINED_PATH="/home/fmorro/INEST-MANISKILL/experiments/opt_pretrain/bc-f40/bc-f40_000_b8_lr4e-04_wd3e-06_e128/"
 
     manage_existing_exp_folder "${HOME}/INEST-MANISKILL/experiments/sb3/${EXPERIMENT_NAME}/${RND_SEED}"
     manage_existing_exp_folder "${HOME}/INEST-MANISKILL/experiments/sb3-lr/${EXPERIMENT_NAME}/${RND_SEED}"
@@ -142,8 +142,8 @@ elif [[ "$1" == "pretrain" || "$1" == "opt-pretrain" ]]; then
 
         sbatch --job-name=inest_opt-pretrain \
             --ntasks-per-node=1 \
-            --cpus-per-task=16 \
-            --mem=32GB \
+            --cpus-per-task=24 \
+            --mem=48GB \
             --mail-type=ALL \
             --mail-user=federico.morro@polito.it \
             --partition=gpu_a40_ext \

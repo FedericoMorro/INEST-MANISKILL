@@ -51,7 +51,7 @@ flags.DEFINE_float("weight_decay_max", 1e-3, "Upper log-uniform bound.")
 flags.DEFINE_integer("emb_size_min", 32, "Lower bound for model embedding size.")
 flags.DEFINE_integer("emb_size_max", 256, "Upper bound for model embedding size.")
 flags.DEFINE_bool("sweep_emb_norm", True, "Whether to sweep embedding normalization (True/False).")
-flags.DEFINE_int("num_frames_per_sequence", 40, "Number of frames per sequence for training and evaluation.")
+flags.DEFINE_integer("num_frames_per_sequence", 40, "Number of frames per sequence for training and evaluation.")
 
 flags.DEFINE_bool("continue_on_trial_failure", True,
     "If True, continue study when a trial raises RuntimeError/IO/schema errors; failed trial is recorded by Optuna.")

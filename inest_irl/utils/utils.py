@@ -425,15 +425,15 @@ def load_learned_reward_data(pretrained_path, device):
     print("No precomputed goal embedding found, computing now...")
     from inest_irl.utils.compute_learned_return import compute_goal_embedding
     train_loader = common.get_downstream_dataloaders(model_config)["train"]
-    subgoal_frames_path = Path(model_config.data.root) / "subgoal_frames.json"
-    if subgoal_frames_path.exists():
+    subgoal_frames_path = os.path.join(pretrained_path, "subgoal_frames.json")
+    if os.path.exists(subgoal_frames_path):
       with open(subgoal_frames_path, 'r') as f:
         subgoal_frames = json.load(f)
       print(f"Found subgoal frames file with {len(subgoal_frames)} trajectories - will compute and plot subgoal rewards")
     else:
       subgoal_frames = None
       print("No subgoal frames file found - will only compute and plot rewards to final goal")
-    goal_emb, subgoal_embs, dist_scale, subgoal_info = compute_goal_embedding(model, train_loader, device, subgoal_frames=subgoal_frames)
+    goal_emb, subgoal_embs, dist_scale, subgoal_info = compute_goal_embedding(model, train_loader, subgoal_frames=subgoal_frames, device=device)
     with open(cache_path, "wb") as fp:
       pickle.dump((goal_emb, subgoal_embs, dist_scale, subgoal_info), fp)
     print(f"Computed and cached goal embedding at {cache_path}")
