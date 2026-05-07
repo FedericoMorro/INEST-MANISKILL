@@ -23,6 +23,7 @@ eval_type_backport==0.2.2
 exceptiongroup==1.3.0
 executing==2.2.1
 Farama-Notifications==0.0.4
+fastdtw>=0.3.4
 fast_kinematics==0.2.2
 filelock==3.16.1
 flatbuffers>=24.3.25

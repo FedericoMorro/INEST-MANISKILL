@@ -15,15 +15,13 @@
 
 """Useful methods shared by all scripts."""
 
-import json
+import inspect
 import json
 import os
 import pickle
-import typing
-from typing import Any, Dict, Optional
+from types import MethodType
+import yaml
 
-from click import Path
-from click import Path
 from absl import logging
 import gymnasium as gym
 from gymnasium.wrappers import RescaleAction
@@ -33,16 +31,11 @@ import numpy as np
 import torch
 from torchkit import CheckpointManager
 from torchkit.experiment import git_revision_hash
-import mani_skill
-import mani_skill.envs.tasks as mani_envs
-import mani_skill
-import mani_skill.envs.tasks as mani_envs
 import importlib
 
-from inest_irl.sac import replay_buffer, wrappers
+from inest_irl.sac import wrappers
 from xirl import common
 
-import yaml
 
 # Global variable to store reference flattened size
 _FLATTEN_REF_SIZE = None
@@ -413,7 +406,7 @@ def wrap_env(env, reward_type, rank, train_flag, exp_dir, learned_reward_data):
   return env
 
 
-def load_learned_reward_data(pretrained_path, device):
+def load_learned_reward_data(pretrained_path, device, data_dir=None):
   model, model_config, model_step = load_model_checkpoint(pretrained_path, device)
   
   cache_path = os.path.join(pretrained_path, "checkpoints", f"cached_embeddings_step_{model_step}.pkl")
@@ -424,6 +417,11 @@ def load_learned_reward_data(pretrained_path, device):
   else:
     print("No precomputed goal embedding found, computing now...")
     from inest_irl.utils.compute_learned_return import compute_goal_embedding
+    
+    if data_dir is not None:
+      print(f"Overriding data directory to {data_dir} for computing goal embedding")
+      model_config.data_dir = data_dir
+    
     train_loader = common.get_downstream_dataloaders(model_config)["train"]
     subgoal_frames_path = os.path.join(pretrained_path, "subgoal_frames.json")
     if os.path.exists(subgoal_frames_path):
@@ -446,3 +444,114 @@ def load_learned_reward_data(pretrained_path, device):
     "subgoal_embs": subgoal_embs,
     "subgoal_info": subgoal_info,
   }
+  
+  
+def safe_render(env, mode="rgb_array", **kwargs):
+    """Safely call env.render, handling ManiSkill/Gym differences and ensuring
+    a single (H, W, 3) RGB NumPy frame is always returned (even if batched)."""
+    
+    frame = None
+    try:
+        # Try Gym-style render first
+        frame = env.render(mode=mode, **kwargs)
+    except TypeError as e:
+        if "positional argument" in str(e) or "unexpected keyword argument" in str(e):
+            # Fallback to ManiSkill-style render()
+            try:
+                frame = env.render()
+            except Exception:
+                raise e
+        else:
+            raise e
+
+    # ---- Normalize ManiSkill / Gym render output ----
+    if frame is None:
+        return None
+
+    # Handle dicts or lists (e.g., ManiSkill multiple cameras)
+    if isinstance(frame, dict):
+        # Pick the first camera image
+        frame = next(iter(frame.values()))
+    elif isinstance(frame, (list, tuple)):
+        frame = frame[0]
+
+    # Convert torch.Tensor → numpy
+    if isinstance(frame, torch.Tensor):
+        frame = frame.detach().cpu().numpy()
+
+    # Handle batched ManiSkill outputs (num_envs, H, W, 3)
+    if isinstance(frame, np.ndarray):
+        if frame.ndim == 4 and frame.shape[-1] == 3:
+            frame = frame[0]
+        elif frame.ndim == 5 and frame.shape[-1] == 3:
+            frame = frame[0, 0]
+
+    # Convert float images to uint8 if needed
+    if isinstance(frame, np.ndarray) and frame.dtype != np.uint8:
+        fmin, fmax = frame.min(), frame.max()
+        if fmin >= 0.0 and fmax <= 1.0:
+            frame = (frame * 255).astype(np.uint8)
+        elif fmin >= -1.0 and fmax <= 1.0:
+            frame = ((frame + 1.0) / 2.0 * 255).astype(np.uint8)
+        else:
+            frame = np.clip(frame, 0, 255).astype(np.uint8)
+
+    # Final sanity check
+    if not isinstance(frame, np.ndarray) or frame.ndim != 3 or frame.shape[-1] != 3:
+        logging.debug(f"Warning: unexpected frame shape {getattr(frame, 'shape', None)}")
+        return None
+
+    return frame
+
+
+def patch_env_render_compatibility(env):
+    """Automatically patch any wrapper in the env chain that has render signature mismatch."""
+    
+    def make_compatible_render(original_render):
+        """Create a compatible render method from an incompatible one."""
+        def compatible_render(self, mode="rgb_array", **kwargs):
+            try:
+                # First try to call original with mode
+                sig = inspect.signature(original_render)
+                if "mode" in sig.parameters or len(sig.parameters) > 1:
+                    return original_render(mode=mode, **kwargs)
+                else:
+                    # Original only accepts self, call without args
+                    return original_render()
+            except TypeError:
+                # Fallback to no-args call
+                return original_render()
+        return compatible_render
+    
+    # Walk the wrapper chain and patch incompatible render methods
+    current_env = env
+    patched_count = 0
+    
+    while current_env is not None:
+        render_method = getattr(current_env, 'render', None)
+        if render_method is not None:
+            try:
+                sig = inspect.signature(render_method)
+                params = list(sig.parameters.keys())
+                
+                # Check if this render method only accepts 'self'
+                if len(params) <= 1 and "mode" not in sig.parameters:
+                    # Patch this wrapper's render method
+                    compatible_method = make_compatible_render(render_method)
+                    current_env.render = MethodType(compatible_method, current_env)
+                    logging.info(f"Patched render method on {type(current_env).__name__}")
+                    patched_count += 1
+            except (ValueError, TypeError):
+                # Can't inspect signature, skip
+                pass
+        
+        # Move to next wrapper in chain
+        if hasattr(current_env, 'env'):
+            current_env = current_env.env
+        elif hasattr(current_env, 'unwrapped') and current_env.unwrapped != current_env:
+            current_env = current_env.unwrapped
+        else:
+            break
+    
+    logging.info(f"Patched {patched_count} wrapper(s) for render compatibility")
+    return env

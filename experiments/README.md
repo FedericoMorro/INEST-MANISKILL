@@ -1,9 +1,11 @@
 # Experiments Naming
 
-## Pretraing
+## Common
 - `bc` / `rc`
   - `bc`: base camera
   - `rc`: render camera
+
+## Pretraining
 - `s1k`
   - `s`: state replay used
   - `1k`: 1000 trajectories used for pretraining

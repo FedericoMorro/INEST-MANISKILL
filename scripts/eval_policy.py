@@ -1,16 +1,16 @@
 import argparse
 import h5py
 import imageio
-import inspect
 import json
 import logging
 import matplotlib.pyplot as plt
+import multiprocessing as mp
 import numpy as np
 import os
 from PIL import Image
 import torch
 from tqdm import tqdm
-from types import MethodType, SimpleNamespace
+from types import SimpleNamespace
 import yaml
 
 from stable_baselines3 import SAC
@@ -33,115 +33,69 @@ FS_TITLE = 13
 FS_LEGEND = 10
 
 
-def safe_render(env, mode="rgb_array", **kwargs):
-    """Safely call env.render, handling ManiSkill/Gym differences and ensuring
-    a single (H, W, 3) RGB NumPy frame is always returned (even if batched)."""
-    
-    frame = None
-    try:
-        # Try Gym-style render first
-        frame = env.render(mode=mode, **kwargs)
-    except TypeError as e:
-        if "positional argument" in str(e) or "unexpected keyword argument" in str(e):
-            # Fallback to ManiSkill-style render()
-            try:
-                frame = env.render()
-            except Exception:
-                raise e
-        else:
-            raise e
-
-    # ---- Normalize ManiSkill / Gym render output ----
-    if frame is None:
-        return None
-
-    # Handle dicts or lists (e.g., ManiSkill multiple cameras)
-    if isinstance(frame, dict):
-        # Pick the first camera image
-        frame = next(iter(frame.values()))
-    elif isinstance(frame, (list, tuple)):
-        frame = frame[0]
-
-    # Convert torch.Tensor → numpy
-    if isinstance(frame, torch.Tensor):
-        frame = frame.detach().cpu().numpy()
-
-    # Handle batched ManiSkill outputs (num_envs, H, W, 3)
-    if isinstance(frame, np.ndarray):
-        if frame.ndim == 4 and frame.shape[-1] == 3:
-            frame = frame[0]
-        elif frame.ndim == 5 and frame.shape[-1] == 3:
-            frame = frame[0, 0]
-
-    # Convert float images to uint8 if needed
-    if isinstance(frame, np.ndarray) and frame.dtype != np.uint8:
-        fmin, fmax = frame.min(), frame.max()
-        if fmin >= 0.0 and fmax <= 1.0:
-            frame = (frame * 255).astype(np.uint8)
-        elif fmin >= -1.0 and fmax <= 1.0:
-            frame = ((frame + 1.0) / 2.0 * 255).astype(np.uint8)
-        else:
-            frame = np.clip(frame, 0, 255).astype(np.uint8)
-
-    # Final sanity check
-    if not isinstance(frame, np.ndarray) or frame.ndim != 3 or frame.shape[-1] != 3:
-        logging.debug(f"Warning: unexpected frame shape {getattr(frame, 'shape', None)}")
-        return None
-
-    return frame
-
-
-def patch_env_render_compatibility(env):
-    """Automatically patch any wrapper in the env chain that has render signature mismatch."""
-    
-    def make_compatible_render(original_render):
-        """Create a compatible render method from an incompatible one."""
-        def compatible_render(self, mode="rgb_array", **kwargs):
-            try:
-                # First try to call original with mode
-                sig = inspect.signature(original_render)
-                if "mode" in sig.parameters or len(sig.parameters) > 1:
-                    return original_render(mode=mode, **kwargs)
-                else:
-                    # Original only accepts self, call without args
-                    return original_render()
-            except TypeError:
-                # Fallback to no-args call
-                return original_render()
-        return compatible_render
-    
-    # Walk the wrapper chain and patch incompatible render methods
-    current_env = env
-    patched_count = 0
-    
-    while current_env is not None:
-        render_method = getattr(current_env, 'render', None)
-        if render_method is not None:
-            try:
-                sig = inspect.signature(render_method)
-                params = list(sig.parameters.keys())
-                
-                # Check if this render method only accepts 'self'
-                if len(params) <= 1 and "mode" not in sig.parameters:
-                    # Patch this wrapper's render method
-                    compatible_method = make_compatible_render(render_method)
-                    current_env.render = MethodType(compatible_method, current_env)
-                    logging.info(f"Patched render method on {type(current_env).__name__}")
-                    patched_count += 1
-            except (ValueError, TypeError):
-                # Can't inspect signature, skip
-                pass
+class EvalResults:
+    """Structured results from evaluation episodes."""
+    def __init__(self):
+        self.rewards = []
+        self.lengths = []
+        self.frame_counts = []
+        self.subgoal_idxs_all = []
+        self.env_rewards = []
+        self.detected_subgoal_idxs_all = []
         
-        # Move to next wrapper in chain
-        if hasattr(current_env, 'env'):
-            current_env = current_env.env
-        elif hasattr(current_env, 'unwrapped') and current_env.unwrapped != current_env:
-            current_env = current_env.unwrapped
-        else:
-            break
-    
-    logging.info(f"Patched {patched_count} wrapper(s) for render compatibility")
-    return env
+    def init_episodes_data(self, seed):
+        self.seed = seed
+        self.episodes_data = []
+        
+    def add_episode(self, rewards, length, frame_count, subgoal_idxs, env_rewards, detected_subgoal_idxs):
+        self.rewards.append(rewards)
+        self.lengths.append(length)
+        self.frame_counts.append(frame_count)
+        self.subgoal_idxs_all.append(subgoal_idxs)
+        self.env_rewards.append(env_rewards)
+        self.detected_subgoal_idxs_all.append(detected_subgoal_idxs)
+        
+    def add_episode_data(self, episode_num, length, actions, observations, rewards, subgoal_idxs):
+        self.episodes_data.append({
+            'seed': self.seed + episode_num,
+            'elapsed_steps': length,
+            'actions': actions,
+            'observations': observations,
+            'rewards': rewards,
+            'subgoal_idxs': subgoal_idxs,
+        })
+        
+    def get_last_episode(self):
+        return {
+            "rewards": self.rewards[-1] if self.rewards else None,
+            "length": self.lengths[-1] if self.lengths else None,
+            "frame_count": self.frame_counts[-1] if self.frame_counts else None,
+            "subgoal_idxs": self.subgoal_idxs_all[-1] if self.subgoal_idxs_all else None,
+            "env_rewards": self.env_rewards[-1] if self.env_rewards else None,
+            "detected_subgoal_idxs": self.detected_subgoal_idxs_all[-1] if self.detected_subgoal_idxs_all else None,
+        }
+        
+    def to_dict(self):
+        return {
+            "rewards": self.rewards,
+            "lengths": self.lengths,
+            "frame_counts": self.frame_counts,
+            "subgoal_idxs_all": self.subgoal_idxs_all,
+            "env_rewards": self.env_rewards,
+            "detected_subgoal_idxs_all": self.detected_subgoal_idxs_all,
+            "episodes_data": self.episodes_data if hasattr(self, 'episodes_data') else [],
+        }
+        
+    def merge_results(self, other):
+        self.rewards.extend(other.rewards)
+        self.lengths.extend(other.lengths)
+        self.frame_counts.extend(other.frame_counts)
+        self.subgoal_idxs_all.extend(other.subgoal_idxs_all)
+        self.env_rewards.extend(other.env_rewards)
+        self.detected_subgoal_idxs_all.extend(other.detected_subgoal_idxs_all)
+        if hasattr(self, 'episodes_data') and hasattr(other, 'episodes_data'):
+            self.episodes_data.extend(other.episodes_data)
+
 
 def _save_video(video_path, frames, fps=10):
     """Save frames to video file using imageio."""
@@ -215,8 +169,17 @@ def _save_reward_plot(plot_path, step_rewards, subgoal_idxs=None, env_rewards=No
     except Exception as e:
         logging.error(f"Error saving reward plot {plot_path}: {e}")
 
-def _save_trajectory_h5(h5_path, json_path, env, episodes_data, save_rgb=False):
+def _save_trajectory_h5(h5_path, json_path, env_config, episodes_data, save_rgb=False):
     """Save evaluation trajectories to H5 and metadata to JSON with optional RGB observations, rewards, and subgoals."""
+    env = utils.make_env(
+        env_config.env_name,
+        seed=env_config.seed,
+        reward_type=env_config.reward_wrapper.type,
+        action_repeat=env_config.action_repeat,
+        frame_stack=env_config.frame_stack,
+        learned_reward_data=env_config.learned_reward_data,
+    )
+    
     try:
         # Save metadata JSON
         json_data = {
@@ -250,9 +213,12 @@ def _save_trajectory_h5(h5_path, json_path, env, episodes_data, save_rgb=False):
                 rewards_array = np.array(rewards, dtype=np.float32)
                 f.create_dataset(f'traj_{episode_id}/rewards', data=rewards_array, compression='gzip')
                 
-                subgoal_array = np.array(subgoal_idxs, dtype=np.int32)
-                subgoal_array = np.pad(subgoal_array, (0, MAX_SUBGOAL - len(subgoal_array)), mode='constant', constant_values=-1)
-                f.create_dataset(f'traj_{episode_id}/subgoal_idxs', data=subgoal_array, compression='gzip')
+                # convert subgoal idxs to per-step subgoal data and save as extra obs for dataset creation handling
+                subgoal_data = []
+                for i in range(len(actions)):
+                    subgoal_data.append([len([idx for idx in subgoal_idxs if idx <= i])])
+                subgoal_array = np.array(subgoal_data, dtype=np.int32)
+                f.create_dataset(f'traj_{episode_id}/obs/extra/subgoal', data=subgoal_array, compression='gzip')
                 
                 json_data["episodes"].append({
                     "episode_id": episode_id,
@@ -265,13 +231,16 @@ def _save_trajectory_h5(h5_path, json_path, env, episodes_data, save_rgb=False):
         with open(json_path, 'w') as f:
             json.dump(json_data, f, indent=2)
         
+        env.close()
+        
         logging.info(f"Saved trajectory H5 to {h5_path} and metadata to {json_path}")
     except Exception as e:
+        env.close()
         logging.error(f"Error saving trajectory H5: {e}")
         import traceback
         traceback.print_exc()
 
-def _run_episode(model, env, video_path=None, save_video=True, save_rgb=False):
+def _run_episode(model, env, eval_results, episode_num, video_path=None, save_video=True, save_rgb=False):
     """Run single evaluation episode, optionally collecting RGB observations, actions, rewards, and subgoal indices."""
     reset_result = env.reset()
     if isinstance(reset_result, tuple):
@@ -281,8 +250,7 @@ def _run_episode(model, env, video_path=None, save_video=True, save_rgb=False):
     
     done = False
     step_count = 0
-    episode_reward = 0.0
-    step_rewards = []
+    ep_cum_reward = 0.0
     frames = []
     actions = []
     observations = []
@@ -303,8 +271,7 @@ def _run_episode(model, env, video_path=None, save_video=True, save_rgb=False):
             truncated = False
         
         reward = float(reward)
-        episode_reward += reward
-        step_rewards.append(reward)
+        ep_cum_reward += reward
         rewards.append(reward)
         step_count += 1
         done = terminated or truncated
@@ -330,7 +297,7 @@ def _run_episode(model, env, video_path=None, save_video=True, save_rgb=False):
         # Render frame for both video and optional observation storage
         if save_video or save_rgb:
             try:
-                frame = safe_render(env, mode="rgb_array")
+                frame = utils.safe_render(env, mode="rgb_array")
                 if frame is not None:
                     if save_video:
                         frames.append(frame)
@@ -343,7 +310,80 @@ def _run_episode(model, env, video_path=None, save_video=True, save_rgb=False):
     if video_path and frames:
         _save_video(video_path, frames)
         
-    return episode_reward, step_count, len(frames), step_rewards, subgoal_idxs, actions, observations, rewards, env_rewards, detected_subgoal_idxs
+    # add episode results to eval_results
+    eval_results.add_episode(
+        rewards=rewards,
+        length=step_count,
+        frame_count=len(frames),
+        subgoal_idxs=subgoal_idxs,
+        env_rewards=env_rewards,
+        detected_subgoal_idxs=detected_subgoal_idxs,
+    )
+    
+    eval_results.add_episode_data(
+        episode_num=episode_num,
+        length=step_count,
+        actions=actions,
+        observations=observations,
+        rewards=rewards,
+        subgoal_idxs=subgoal_idxs,
+    )
+    
+    return eval_results.get_last_episode()
+        
+
+def _single_process_evaluation(pipe, checkpoint_dir, eval_env_config, args, ep_num_bounds, device, traj_dir=None):
+    """Run evaluation episodes sequentially in a single process."""
+    # load model
+    logging.info(f"Loading checkpoint from {checkpoint_dir}...")
+    model = SAC.load(checkpoint_dir, device=device)
+    
+    # create EvalResults instance to store results from this process
+    eval_results = EvalResults()
+    eval_results.init_episodes_data(args.seed)
+    
+    # create evaluation environment
+    logging.info(f"Creating environment: {eval_env_config.env_name}")
+    eval_env = utils.make_env(
+        eval_env_config.env_name,
+        seed=eval_env_config.seed,
+        reward_type=eval_env_config.reward_wrapper.type,
+        action_repeat=eval_env_config.action_repeat,
+        frame_stack=eval_env_config.frame_stack,
+        learned_reward_data=eval_env_config.learned_reward_data,
+    )
+    
+    # wait for others to init before starting evaluation loop
+    pipe.send("ready")
+    pipe.recv()  # wait for signal to start evaluation
+    
+    start_ep_num, end_ep_num = ep_num_bounds
+        
+    for episode_num in tqdm(range(start_ep_num, end_ep_num), desc="Evaluating", unit="episode", disable=args.no_progress_bar):
+        video_path = None
+        if args.save_viz and traj_dir:
+            video_path = os.path.join(traj_dir, f"{episode_num}.mp4")
+            
+        eval_env.unwrapped.set_seed(args.seed + episode_num)    #! crucial to have (start, end) to have different seeds for different processes
+         
+        ep_data = _run_episode(
+            model, eval_env, eval_results, episode_num, video_path, save_video=args.save_viz, save_rgb=args.save_rgb
+        )
+        
+        # save reward curve plot
+        if args.save_viz and traj_dir:
+            plot_path = os.path.join(traj_dir, f"{episode_num}.png")
+            _save_reward_plot(plot_path, ep_data["rewards"], ep_data["subgoal_idxs"], ep_data["env_rewards"], ep_data["detected_subgoal_idxs"])
+        
+        add_info = f", env_reward={np.sum(ep_data['env_rewards']):.2f}" if ep_data['env_rewards'] is not None else ""
+        add_info += f", subgoal={len(ep_data['subgoal_idxs'])}" if ep_data['subgoal_idxs'] is not None else ""
+        add_info += f", detected_subgoal={len(ep_data['detected_subgoal_idxs'])}" if ep_data['detected_subgoal_idxs'] is not None else ""
+        logging.info(f"Episode {episode_num}: reward={np.sum(ep_data['rewards']):.2f}, length={ep_data['length']}, frames={ep_data['frame_count']}{add_info}")
+        
+    print(eval_results.to_dict())
+        
+    eval_env.close()
+    pipe.send(eval_results)
 
 
 def _create_plots(results, output_dir):
@@ -351,7 +391,7 @@ def _create_plots(results, output_dir):
     fig, axes = plt.subplots(1, 2, figsize=FIGSIZE_SUMMARY)
 
     # Plot 1: Reward distribution
-    rewards = results["individual_rewards"]
+    rewards = results["cumulative_rewards"]
     axes[0].bar(range(len(rewards)), rewards, alpha=0.7, color='steelblue', edgecolor='black', linewidth=0.5)
     axes[0].axhline(results["mean_reward"], color='red', linestyle='--', linewidth=2,
                     label=f"Mean: {results['mean_reward']:.2f}")
@@ -393,6 +433,8 @@ def main():
     parser.add_argument("--seed", type=int, default=2222, help="Random seed for evaluation")
     parser.add_argument("--num_episodes", type=int, default=100,
                         help="Number of evaluation episodes")
+    parser.add_argument("--num_processes", type=int, default=1,
+                        help="Number of parallel processes for evaluation")
     parser.add_argument("--save_viz", action="store_true", default=True,
                         help="Whether to save visualization (videos and plots)")
     parser.add_argument("--no_save_video", action="store_false", dest="save_video",
@@ -403,6 +445,8 @@ def main():
                         help="Disable progress bar")
     parser.add_argument("--learned_reward_model_path", type=str, default=None,
                         help="Path to the learned reward model checkpoint (if using a learned reward wrapper) - overrides config path if specified")
+    parser.add_argument("--learned_reward_data_dir", type=str, default=None,
+                        help="Data directory to use for computing learned reward embeddings (overrides config and checkpoint paths if specified)")
     parser.add_argument("--device", type=str, default="cpu",
                         help="Device to use (e.g., 'cpu', 'cuda:0'), NOTE: GPU does not support rendering, so videos saving is compromised when using GPU")
     
@@ -455,35 +499,30 @@ def main():
         logging.info(f"Getting learned reward model for reward wrapper type {config.reward_wrapper.type}...")
         if args.learned_reward_model_path is not None:
             logging.info(f"Loading learned reward model from {args.learned_reward_model_path}...")
-            learned_reward_data = utils.load_learned_reward_data(args.learned_reward_model_path, device=device)
+            learned_reward_data = utils.load_learned_reward_data(args.learned_reward_model_path, device=device, data_dir=args.learned_reward_data_dir)
         else:
             logging.info(f"Getting learned reward model path from config {config.reward_wrapper.pretrained_path}")
-            learned_reward_data = utils.load_learned_reward_data(config.reward_wrapper.pretrained_path, device=device)
+            learned_reward_data = utils.load_learned_reward_data(config.reward_wrapper.pretrained_path, device=device, data_dir=args.learned_reward_data_dir)
     else:
         learned_reward_data = None
-        
-    # Create evaluation environment
-    logging.info(f"Creating environment: {config.env_name}")
-    eval_env = utils.make_env(
-        config.env_name,
+    
+    # Patch render compatibility in the wrapper chain
+    #eval_env = utils.patch_env_render_compatibility(eval_env)
+    
+    # populate eval_env_config with necessary info for creating envs in each process
+    eval_env_config = SimpleNamespace(
+        env_name=config.env_name,
         seed=args.seed,
-        reward_type=config.reward_wrapper.type,
+        reward_wrapper=config.reward_wrapper,
         action_repeat=config.action_repeat,
         frame_stack=config.frame_stack,
         learned_reward_data=learned_reward_data,
     )
-    
-    # Patch render compatibility in the wrapper chain
-    #eval_env = patch_env_render_compatibility(eval_env)
 
-    # Load model
-    logging.info(f"Loading checkpoint from {checkpoint_dir}...")
-    model = SAC.load(checkpoint_dir, device=device)
-
-    # Create output directories: parent/eval_results/{model_basename}/
+    # Create output directories: parent/out_eval-policy-py/{model_basename}/
     model_basename = os.path.basename(checkpoint_dir).split('.')[0]
     parent_dir = os.path.dirname(os.path.dirname(checkpoint_dir))
-    results_dir = os.path.join(parent_dir, "eval_results", model_basename)
+    results_dir = os.path.join(parent_dir, "out_eval-policy-py", model_basename)
     traj_dir = os.path.join(results_dir, "trajs") if args.save_viz else None
     if traj_dir:
         os.makedirs(traj_dir, exist_ok=True)
@@ -491,51 +530,39 @@ def main():
 
     # Run evaluation episodes manually
     logging.info(f"Running {args.num_episodes} evaluation episodes...")
-    rewards = []
-    lengths = []
-    frame_counts = []
-    subgoal_idxs_all = []
-    env_rewards = []
-    detected_subgoal_idxs_all = []
-    episodes_data = []
+    procs = []
+    pipes = []
+    mp.set_start_method('spawn', force=True)
+    for proc_id in range(args.num_processes):
+        logging.info(f"Starting evaluation on process {proc_id + 1}/{args.num_processes}...")
+        ep_num_bounds = (proc_id * (args.num_episodes // args.num_processes), (proc_id + 1) * (args.num_episodes // args.num_processes))
+        parent_pipe, child_pipe = mp.Pipe()
+        proc = mp.Process(target=_single_process_evaluation, args=(child_pipe, checkpoint_dir, eval_env_config, args, ep_num_bounds, device, traj_dir))
+        proc.start()
+        procs.append(proc)
+        pipes.append(parent_pipe)
         
-    for episode_num in tqdm(range(args.num_episodes), desc="Evaluating", unit="episode", disable=args.no_progress_bar):
-        video_path = None
-        if args.save_viz and traj_dir:
-            video_path = os.path.join(traj_dir, f"{episode_num}.mp4")
-            
-        eval_env.unwrapped.set_seed(args.seed + episode_num)
+    [pipe.recv() for pipe in pipes]  # wait for all processes to finish init
+    [pipe.send("start") for pipe in pipes]  # signal all processes to continue
+    
+    # collect results from all processes
+    eval_results = [pipe.recv() for pipe in pipes]
+    [proc.join() for proc in procs]  # wait for all processes to finish
+    
+    # merge results from all processes 
+    eval_result = eval_results[0]
+    if len(eval_results) > 1:
+        for res in eval_results[1:]:
+            eval_result.merge_results(res)
         
-        episode_reward, episode_length, frame_count, step_rewards, subgoal_idxs, actions, observations, ep_rewards, ep_env_rewards, detected_subgoal_idxs = _run_episode(
-            model, eval_env, video_path, save_video=args.save_viz, save_rgb=args.save_rgb
-        )
-        rewards.append(episode_reward)
-        lengths.append(episode_length)
-        frame_counts.append(frame_count)
-        subgoal_idxs_all.append(subgoal_idxs)
-        env_rewards.append(ep_env_rewards)
-        detected_subgoal_idxs_all.append(detected_subgoal_idxs)
-        
-        
-        # Store trajectory data for H5 saving
-        episodes_data.append({
-            'seed': args.seed + episode_num,
-            'elapsed_steps': episode_length,
-            'actions': actions,
-            'observations': observations,
-            'rewards': ep_rewards,
-            'subgoal_idxs': subgoal_idxs,
-        })
-        
-        # Save reward curve plot
-        if args.save_viz and traj_dir:
-            plot_path = os.path.join(traj_dir, f"{episode_num}.png")
-            _save_reward_plot(plot_path, step_rewards, subgoal_idxs, ep_env_rewards, detected_subgoal_idxs)
-        
-        add_info = f", env_reward={np.sum(ep_env_rewards):.2f}" if ep_env_rewards is not None else ""
-        add_info += f", subgoal={len(subgoal_idxs)}" if subgoal_idxs is not None else ""
-        add_info += f", detected_subgoal={len(detected_subgoal_idxs)}" if detected_subgoal_idxs is not None else ""
-        logging.info(f"Episode {episode_num}: reward={episode_reward:.2f}, length={episode_length}, frames={frame_count}{add_info}")
+    # extract results for statistics and plotting
+    rewards = eval_result.rewards
+    lengths = eval_result.lengths
+    frame_counts = eval_result.frame_counts
+    subgoal_idxs_all = eval_result.subgoal_idxs_all
+    env_rewards = eval_result.env_rewards
+    detected_subgoal_idxs_all = eval_result.detected_subgoal_idxs_all
+    episodes_data = eval_result.episodes_data if hasattr(eval_result, 'episodes_data') else []
 
     # Compute statistics
     mean_reward = float(np.mean(rewards))
@@ -548,11 +575,11 @@ def main():
     # Convert subgoal indices to dict of reach rates
     episode_subgoals_dict = {}
     if subgoal_idxs_all:
-        max_subgoal = eval_env.unwrapped.max_subgoal
+        max_subgoal = MAX_SUBGOAL
         episode_subgoals_dict = {i: 0 for i in range(max_subgoal + 1)}
         for subgoal_idxs in subgoal_idxs_all:
             # interpret first as failure rate, then cumulative reach rates for each subgoal
-            subgoal_reached = len(subgoal_idxs)
+            subgoal_reached = len(subgoal_idxs) if subgoal_idxs is not None else 0
             if subgoal_reached == 0:
                 episode_subgoals_dict[0] += 1
             else:
@@ -564,7 +591,7 @@ def main():
     if detected_subgoal_idxs_all:
         detected_subgoals_dict = {i: 0 for i in range(max_subgoal + 1)}
         for subgoal_idxs in detected_subgoal_idxs_all:
-            subgoal_reached = len(subgoal_idxs)
+            subgoal_reached = len(subgoal_idxs) if subgoal_idxs is not None else 0
             if subgoal_reached == 0:
                 detected_subgoals_dict[0] += 1
             else:
@@ -573,7 +600,7 @@ def main():
         detected_subgoals_dict = {k: v / args.num_episodes for k, v in detected_subgoals_dict.items()}
     
     success_rate = episode_subgoals_dict.get(max_subgoal, 0.0)
-    avg_subgoal_reached = np.mean([len(idxs) for idxs in subgoal_idxs_all])
+    avg_subgoal_reached = np.mean([len(idxs) if idxs is not None else 0 for idxs in subgoal_idxs_all])
 
     # Log results
     logging.info("=" * 50)
@@ -595,7 +622,7 @@ def main():
         logging.info(f"Min-Max Environment Reward: {np.min(env_rewards):.4f} - {np.max(env_rewards):.4f}")
         
     if detected_subgoals_dict:
-        avg_detected_subgoal_reached = np.mean([len(idxs) for idxs in detected_subgoal_idxs_all])
+        avg_detected_subgoal_reached = np.mean([len(idxs) if idxs is not None else 0 for idxs in detected_subgoal_idxs_all])
         logging.info(f"Average Detected Subgoals Reached: {avg_detected_subgoal_reached:.2f} / {max_subgoal}")
         logging.info("Detected Subgoal Reach Rates:")
         for subgoal_idx in range(max_subgoal + 1):
@@ -617,6 +644,7 @@ def main():
         "success_rate": success_rate,
         "average_subgoals_reached": avg_subgoal_reached,
         "subgoal_reach_rates": episode_subgoals_dict,
+        "cumulative_rewards": np.sum(rewards, axis=1).tolist(),
         "individual_rewards": rewards,
         "episode_lengths": lengths,
         "frame_counts": frame_counts,
@@ -633,12 +661,11 @@ def main():
     # Save trajectories to H5 for replay compatibility
     h5_path = os.path.join(results_dir, "trajectories.h5")
     json_traj_path = os.path.join(results_dir, "trajectories.json")
-    _save_trajectory_h5(h5_path, json_traj_path, eval_env, episodes_data, save_rgb=args.save_rgb)
+    _save_trajectory_h5(h5_path, json_traj_path, eval_env_config, episodes_data, save_rgb=args.save_rgb)
 
     # Create plots
     _create_plots(results, results_dir)
 
-    eval_env.close()
     logging.info("Evaluation complete!")
 
 

@@ -1,13 +1,16 @@
 #!/bin/bash
 
 if [ "$#" -lt 1 ]; then
-    echo "Usage: $0 <model_path> [--overwrite] [--eval_learned_return_model <dir>[,<data_dir>]]"
+    echo "Usage: $0 <model_path> [--count N] [--lr_model_path lr_model_path] [--lr_data_dir lr_data_dir] [--overwrite] [--eval_learned_return_model <dir>[,<data_dir>]]"
     exit 1
 fi
 
 # parse arguments
 model_path="$1"
+count=100
 overwrite=false
+lr_data_dir="None"
+lr_model_path="None"
 eval_learned_return_model=""
 eval_learned_return_data_dir=""
 
@@ -18,6 +21,30 @@ while [[ $# -gt 0 ]]; do
         --overwrite)
             overwrite=true
             shift
+            ;;
+        --count)
+            if [ -z "$2" ]; then
+                echo "Error: --count flag requires a numeric argument"
+                exit 1
+            fi
+            count="$2"
+            shift 2
+            ;;
+        --lr_model_path)
+            if [ -z "$2" ]; then
+                echo "Error: --lr_model_path requires a path argument"
+                exit 1
+            fi
+            lr_model_path="$2"
+            shift 2
+            ;;
+        --lr_data_dir)
+            if [ -z "$2" ]; then
+                echo "Error: --lr_data_dir requires a directory argument"
+                exit 1
+            fi
+            lr_data_dir="$2"
+            shift 2
             ;;
         --eval_learned_return_model)
             if [ -z "$2" ]; then
@@ -30,7 +57,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         *)
             echo "Unknown flag: $1"
-            echo "Usage: $0 <model_path> [--overwrite] [--eval_learned_return_model <dir>[,<data_dir>]]"
+            echo "Usage: $0 <model_path> [--lr_model_path <lr_model_path>] [--lr_data_dir <lr_data_dir>] [--overwrite] [--eval_learned_return_model <dir>[,<data_dir>]]"
             exit 1
             ;;
     esac
@@ -75,15 +102,21 @@ fi
 # Check if evaluation results already exist for this model, if not run evaluation
 print_with_border "EVALUATION"
 
-eval_path="${exp_path}/eval_results/${model_step_no_ext}"
+eval_path="${exp_path}/out_eval-policy-py/${model_step_no_ext}"
 
 if [[ -d "$eval_path" && "$overwrite" == false ]]; then
     echo "Evaluation results for model: $exp_name - $exp_seed - $model_step_no_ext, already exist at: $eval_path"
 else
     echo "Evaluation results for model: $exp_name - $exp_seed - $model_step_no_ext, not found. Running policy evaluation with default settings..."
+    echo "Custom Learned Reward Model Path specified: $lr_model_path"
+    echo "Custom Learned Reward Data Dir specified: $lr_data_dir"
+
     python scripts/eval_policy.py \
         "$model_path" \
-        --save_rgb
+        --save_rgb \
+        --num_episodes "$count" \
+        --learned_reward_model_path "$lr_model_path" \
+        --learned_reward_data_dir "$lr_data_dir"
 fi
 
 
@@ -91,8 +124,8 @@ fi
 # Create dataset directly from evaluation trajectories (already contain RGB observations)
 print_with_border "DATASET CREATION"
 
-save_folder_name="${exp_name}*${exp_seed}*${model_step_no_ext}"
-input_traj_h5="${exp_path}/eval_results/${model_step_no_ext}/trajectories.h5"
+save_folder_name="${exp_name}.${exp_seed}.${model_step_no_ext}"
+input_traj_h5="${eval_path}/trajectories.h5"
 output_path="../data/inest-maniskill/experiment_data-trajs/${save_folder_name}"
 output_dataset_dir="${output_path}/dataset"
 
