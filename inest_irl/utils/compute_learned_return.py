@@ -281,7 +281,7 @@ def compute_reward_metrics(rewards: np.array) -> dict[str, float]:
   # monotonicity: fraction of steps where reward increases
   increases = np.sum(first_diff > 0)
   metrics['monotonicity'] = float(increases / len(first_diff))
-  metrics['is_monotone_increasing'] = bool(np.all(first_diff >= 0))
+  metrics['is_monotonic_increasing'] = bool(np.all(first_diff >= 0))
   
   # trend: linear regression slope
   x = np.arange(len(rewards))
