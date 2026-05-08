@@ -86,7 +86,7 @@ if [[ "$1" == "rl" ]]; then
     export REWARD_WRAPPER_PRETRAINED_PATH="/home/fmorro/INEST-MANISKILL/experiments/opt_pretrain/bc-f40/bc-f40_000_b8_lr4e-04_wd3e-06_e128/"
 
     manage_existing_exp_folder "${HOME}/INEST-MANISKILL/experiments/sb3/${EXPERIMENT_NAME}/${RND_SEED}"
-    manage_existing_exp_folder "${HOME}/INEST-MANISKILL/experiments/sb3-lr/${EXPERIMENT_NAME}/${RND_SEED}"
+    manage_existing_exp_folder "${HOME}/INEST-MANISKILL/experiments/lr-sb3/${EXPERIMENT_NAME}/${RND_SEED}"
 
     sbatch --job-name=inest_rl_train \
         --ntasks-per-node=1 \
@@ -105,7 +105,7 @@ if [[ "$1" == "rl" ]]; then
 elif [[ "$1" == "pretrain" || "$1" == "opt-pretrain" ]]; then
     echo "Submitting INEST MANISKILL pretraining job..."
 
-    DATASET_PATH="/home/fmorro/data/inest-maniskill/dataset-bc-1000-states"
+    DATASET_PATH="/home/fmorro/data/inest-maniskill/dataset-hc-1000-states"
 
     # copy dataset to SCRATCH_FLASH for faster access during training (if already present ask user)
     export SCRATCH_FLASH_DATASET_PATH="${SCRATCH_FLASH}/$(basename ${DATASET_PATH})"
@@ -127,7 +127,7 @@ elif [[ "$1" == "pretrain" || "$1" == "opt-pretrain" ]]; then
             --mem=32GB \
             --mail-type=ALL \
             --mail-user=federico.morro@polito.it \
-            --partition=gpu_a40 \
+            --partition=gpu_a40_ext \
             --gres=gpu:1 \
             --output=${HOME}/logs/%j_${EXPERIMENT_NAME}_pretrain.out \
             --error=${HOME}/logs/%j_${EXPERIMENT_NAME}_pretrain.err \

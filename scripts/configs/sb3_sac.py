@@ -16,7 +16,8 @@ def get_config():
   # ================================================= #
   # Main parameters.
   # ================================================= #
-  config.save_dir = "/home/fmorro/INEST-MANISKILL/experiments/sb3"
+  config.save_path = "/home/fmorro/INEST-MANISKILL/experiments/"
+  config.save_dir = "sb3"
 
   # Set this to True to allow CUDA to find the best convolutional algorithm to
   # use for the given parameters. When False, cuDNN will deterministically

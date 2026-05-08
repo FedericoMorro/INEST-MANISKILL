@@ -435,7 +435,8 @@ def _make_env_wrapper(config, seed, rank, train_flag, learned_reward_data, exp_d
 def main(_):
     # get config
     config = FLAGS.config
-    config.save_dir = f"{config.save_dir}-lr" if config.reward_wrapper.type not in ["sparse", "env", "env_state-intrinsic"] else config.save_dir
+    config.save_dir = f"lr-{config.save_dir}" if config.reward_wrapper.type not in ["sparse", "env", "env_state-intrinsic"] else config.save_dir
+    config.save_dir = os.path.join(config.save_path, config.save_dir)
     exp_dir = os.path.join(
         config.save_dir,
         FLAGS.experiment_name,
