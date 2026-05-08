@@ -18,6 +18,7 @@ def get_config():
   # ================================================= #
   config.save_path = "/home/fmorro/INEST-MANISKILL/experiments/"
   config.save_dir = "sb3"
+  # 'lr-' will be prepended to the save_dir, for learned reward wrappers that require a pretrained model
 
   # Set this to True to allow CUDA to find the best convolutional algorithm to
   # use for the given parameters. When False, cuDNN will deterministically
@@ -34,13 +35,18 @@ def get_config():
   # Wrappers.
   # ================================================= #
   # Observation mode passed to ManiSkill gym.make (e.g., 'state', 'state_dict', 'rgbd').
+  # rgb will be attached if learned visual reward wrapper is used, but the policy will only receive state-based obs
   config.obs_mode = "state"
 
   config.action_repeat = 1
   config.frame_stack = 3
   config.env_randomization = "same-seed" # "default", "minimal", "same-seed"
-  config.render_camera = "base_camera"  # "base_camera", "render_camera"
   config.reward_scaling = 1.0
+  
+  # camera for rendering videos
+  config.render_camera = "hand_camera"
+  # the list of cameras used as input to the reward model, if using a vision-based reward wrapper, will be automatically
+  #   populated based on the config of the pretrained reward model
   
   #config.same_seed_randomization = 5    # traj_id=2
   config.same_seed_randomization = 18   # traj_id=15
@@ -48,7 +54,7 @@ def get_config():
   config.reward_wrapper = ml_collections.ConfigDict()
   # Can be one of ['distance_to_goal', 'goal_classifier', 'inest', 'inest_knn', 'state_intrinsic', 'reds'].
   #   currently supported -> ['sparse', 'env', 'env_state-intrinsic', 'goal_dist', 'subgoal-dist']
-  config.reward_wrapper.type = "subgoal_dist"
+  config.reward_wrapper.type = "goal_dist"
   # Needed if using a vision-based learned reward wrapper
   config.reward_wrapper.pretrained_path = "/data/fmorro/inest-maniskill/_experiments/pretrain/rcs1k_fr50_b16/"
 

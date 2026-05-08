@@ -413,11 +413,17 @@ class EvalSaveCallback(BaseCallback):
 
 def _make_env_wrapper(config, seed, rank, train_flag, learned_reward_data, exp_dir):
     """Factory function for creating environments in subprocesses."""
+    obs_mode = config.obs_mode
+    if config.reward_wrapper.type == "sparse":
+        obs_mode = "state-dict"
+    elif config.reward_wrapper.type not in ["env", "env_state-intrinsic"]:
+        obs_mode = f"{config.obs_mode}+rgb" # attach rgb to obs if using a learned reward wrapper that requires vision input
+    
     return utils.make_env(
         env_name=config.env_name,
         seed=seed,
         reward_type=config.reward_wrapper.type,
-        obs_mode="state" if config.reward_wrapper.type != "sparse" else "state_dict",
+        obs_mode=obs_mode,
         frame_stack=config.frame_stack,
         action_repeat=config.action_repeat,
         env_randomization=config.env_randomization,

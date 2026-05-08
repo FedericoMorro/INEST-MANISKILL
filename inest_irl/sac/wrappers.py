@@ -416,12 +416,14 @@ class LearnedVisualRewardWrapper(RewardWrapper):
         *args,
         model,  # model that ingests RGB frames and returns embeddings, subclass of `xirl.models.SelfSupervisedModel`.
         device,
+        camera_names,
         res_hw = None,      # optional (H, W) to resize the environment image before feeding it to the model.
         **kwargs
     ):
         super().__init__(*args, **kwargs)
         self.device = device
         self.model = model.to(device).eval()
+        self.camera_names = camera_names
         self.res_hw = res_hw
         print(f"Initialized LearnedVisualRewardWrapper with model {model.__class__.__name__} on device {device} and res_hw={res_hw}")
 
@@ -432,11 +434,10 @@ class LearnedVisualRewardWrapper(RewardWrapper):
         x = x.to(self.device)
         return x
 
-    def _render_obs(self):
+    def _adjust_obs(self, pixels):
         """Render the pixels at the desired resolution."""
         # TODO(kevin): Make sure this works for mujoco envs.
-        pixels = self.env.render()
-
+        
         # Handle dict/list outputs (maniskill may return multiple cameras)
         if isinstance(pixels, dict):
             pixels = next(iter(pixels.values()))
@@ -495,7 +496,8 @@ class LearnedVisualRewardWrapper(RewardWrapper):
         self.cum_env_reward += reward
         info["cum_env_reward"] = self.cum_env_reward
         
-        pixels = self._render_obs()
+        #! currently only support using one camera for reward computation, can be extended to multi-cam if needed
+        pixels = self._adjust_obs(info['sensor_data'][self.camera_names[0]])
         learned_reward = self._get_reward_from_image(pixels)
         
         return obs, learned_reward, terminated, truncated, info

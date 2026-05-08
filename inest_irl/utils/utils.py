@@ -127,6 +127,11 @@ def setup_experiment(exp_dir, config, resume=False, overwrite=False):
       yaml.dump(ConfigDict.to_dict(config), fp)
     with open(os.path.join(exp_dir, "git_hash.txt"), "w") as fp:
       fp.write(git_revision_hash())
+      
+def save_config(exp_dir, config):
+  """Saves the config dict as a yaml file."""
+  with open(os.path.join(exp_dir, "config.yaml"), "w") as fp:
+    yaml.dump(ConfigDict.to_dict(config), fp)
 
 
 def load_config_from_dir(
@@ -209,7 +214,7 @@ def make_env(
   frame_stack = 1,
   action_repeat = 1,
   env_randomization = "default",
-  render_camera = "base_camera",
+  render_camera = "render_camera",
   reward_scaling = 1.0,
   rank = 0,
   train_flag = False,
@@ -324,11 +329,13 @@ def wrap_env(env, reward_type, rank, train_flag, exp_dir, learned_reward_data):
   device = learned_reward_data["device"]
   goal_emb = learned_reward_data["goal_emb"]
   dist_scale = learned_reward_data["dist_scale"]
+  camera_names = learned_reward_data["config"].camera_names
     
   if reward_type == "goal_dist":
     return wrappers.GoalDistanceLearnedVisualRewardWrapper(
       env=env, rank=rank, train_flag=train_flag, exp_dir=exp_dir,
       model=model, device=device, #res_hw=model_config.data_augmentation.image_size,  -> should be already 128x128
+      camera_names=camera_names,
       goal_emb=goal_emb, dist_scale=dist_scale,
     )
     
@@ -340,6 +347,7 @@ def wrap_env(env, reward_type, rank, train_flag, exp_dir, learned_reward_data):
     return wrappers.SubgoalDistanceLearnedVisualRewardWrapper(
       env=env, rank=rank, train_flag=train_flag, exp_dir=exp_dir,
       model=model, device=device, #res_hw=model_config.data_augmentation.image_size,  -> should be already 128x128
+      camera_names=camera_names,
       goal_emb=goal_emb, subgoal_embs=subgoal_embs, dist_scale=dist_scale, subgoal_info=subgoal_info,
     )
   else:
@@ -438,6 +446,7 @@ def load_learned_reward_data(pretrained_path, device, data_dir=None):
     
   return {
     "model": model,
+    "config": model_config,
     "device": device,
     "goal_emb": goal_emb,
     "dist_scale": dist_scale,

@@ -39,7 +39,7 @@ try:
 except Exception:
     import imageio
 
-IMAGE_KEY = 'obs/sensor_data/base_camera/rgb'
+IMAGE_KEY = 'obs/sensor_data/*/rgb'     # '*' will be replaced by camera name specified in --vis flag (e.g. "base_camera", "hand_camera")
 FPS = 10
 
 # report-friendly plotting defaults (compact figure size with readable text)
@@ -245,17 +245,16 @@ def _get_nested(h5obj, path):
     return obj
 
 
-def _save_demo_videos(h5_file, demo_names, output_dir, subgoals_path=None):
+def _save_demo_videos(h5_file, camera_name, demo_names, out_dir, subgoals_path=None):
     print("Saving demo videos with subgoal overlays (if provided)...")
-    out_dir = os.path.join(output_dir, "videos")
-    os.makedirs(out_dir, exist_ok=True)
 
     subgoals_data = json.load(open(subgoals_path, 'r')) if subgoals_path is not None else None
 
     for demo_name in tqdm(demo_names, desc="Demos"):
         demo = h5_file[demo_name]
         demo_idx = demo_name.split("_")[-1]
-        imgs = _get_nested(demo, IMAGE_KEY)
+        image_key = IMAGE_KEY.replace("*", camera_name)
+        imgs = _get_nested(demo, image_key)
         imgs = np.asarray(imgs)
 
         # write video
@@ -385,7 +384,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Inspect H5 file structure and optionally create visualizations/videos")
     parser.add_argument("filepath", type=str, help="Path to H5 file")
     parser.add_argument("--print_structure", action="store_true", help="Print the structure of the H5 file")
-    parser.add_argument("--vis", action="store_true", help="Save per-trajectory videos")
+    parser.add_argument("--vis", type=str, default=None, help="Save per-trajectory videos, with specified camera")
     parser.add_argument("--sample_traj", action="store_true", help="Create trajectory plot images")
     parser.add_argument("--stats", action="store_true", help="Create txt file with dataset stats")
     parser.add_argument("--rewards", action="store_true", help="Plot reward curves for all demos")
@@ -434,8 +433,8 @@ if __name__ == "__main__":
             exit(0)
 
         # save videos if requested
-        if args.vis:
-            _save_demo_videos(f, demo_names, output_dir=args.output_path, subgoals_path=subgoals_path)
+        if args.vis is not None:
+            _save_demo_videos(f, camera_name=args.vis, demo_names=demo_names, out_dir=args.output_path, subgoals_path=subgoals_path)
 
         # create output path for plots and stats
         dir_name = os.path.dirname(args.filepath).split("/")[-1]

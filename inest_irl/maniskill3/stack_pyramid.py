@@ -34,6 +34,33 @@ N_STEP_DENSE_REWARD = 4
 SUCCESS_REWARD = 2.0
 
 
+#! override: https://github.com/haosulab/ManiSkill/blob/main/mani_skill/agents/robots/panda/panda_wristcam.py
+from mani_skill import PACKAGE_ASSET_DIR
+from mani_skill.agents.registration import register_agent
+
+@register_agent(override=True)  # crucial, otherwise the original PandaWristCam will be registered
+class PandaWristCam(Panda):
+    """Panda arm robot with the real sense camera attached to gripper"""
+
+    uid = "panda_wristcam"
+    urdf_path = f"{PACKAGE_ASSET_DIR}/robots/panda/panda_v3.urdf"
+
+    @property
+    def _sensor_configs(self):
+        return [
+            CameraConfig(
+                uid="hand_camera",
+                pose=sapien.Pose(p=[0, 0, 0], q=[1, 0, 0, 0]),
+                width=128,
+                height=128,
+                fov=np.pi / 2,
+                near=0.01,
+                far=100,
+                mount=self.robot.links_map["camera_link"],
+            )
+        ]
+
+
 @register_env("StackPyramid-v1custom", max_episode_steps=HORIZON)
 class StackPyramidEnv(BaseEnv):
     """
@@ -65,12 +92,13 @@ class StackPyramidEnv(BaseEnv):
         self,
         *args,
         seed=None,
-        env_reward_type="sparse",
+        env_reward_type="normalized_dense",
         robot_uids="panda_wristcam",
         robot_init_qpos_noise=0.02,
         env_randomization=DEFAULT_ENV_RANDOMIZATION,
         render_camera=DEFAULT_RENDER_CAMERA,
         enforce_full_episodes=True,
+        is_state_based_policy=True,
         **kwargs
     ):
         print("Initializing custom StackPyramid environment")
@@ -81,6 +109,7 @@ class StackPyramidEnv(BaseEnv):
         
         self.env_randomization = env_randomization
         self.enforce_full_episodes = enforce_full_episodes
+        self.is_state_based_policy = is_state_based_policy
         self.render_camera = render_camera
         
         kwargs["reward_mode"] = env_reward_type
@@ -104,8 +133,18 @@ class StackPyramidEnv(BaseEnv):
         if self.render_camera == "render_camera":
             pose = sapien_utils.look_at([0.6, 0.7, 0.6], [0.0, 0.0, 0.35])
             return CameraConfig("render_camera", pose, 128, 128, 1, 0.01, 100)
+        
         elif self.render_camera == "base_camera":
             return self._default_sensor_configs
+        
+        elif self.render_camera == "hand_camera":
+            hand_camera_config = None
+            for sensor_config in self.agent._sensor_configs:
+                if hasattr(sensor_config, "uid") and sensor_config.uid == "hand_camera":
+                    hand_camera_config = sensor_config
+                    break
+            return hand_camera_config
+        
         else:
             raise ValueError(f"Unsupported render camera: {self.render_camera}")
 
@@ -305,7 +344,16 @@ class StackPyramidEnv(BaseEnv):
     
     def get_current_subgoal(self):
         return self.curr_subgoal
-
+    
+    
+    def _state_based_policy_obs(self, obs: dict, info: dict):
+        # move sensor data to info, and leave state out of dict obs for state-based policy
+        if "sensor_data" in obs:
+            info["sensor_data"] = obs.pop("sensor_data")
+        if "sensor_param" in obs:
+            info["sensor_param"] = obs.pop("sensor_param")
+        state = obs.pop("state")
+        return state, info  # to be interpreted as (obs, info)
 
     def set_seed(self, seed):
         self.seed = seed
@@ -332,6 +380,9 @@ class StackPyramidEnv(BaseEnv):
         self.prev_cubeA_pos = self.cubeA.pose.p
         self.curr_subgoal = 0
         self.subgoal_idxs = []
+        
+        if self.is_state_based_policy:
+            obs, info = self._state_based_policy_obs(obs, info)
 
         return obs, info
     
@@ -350,11 +401,14 @@ class StackPyramidEnv(BaseEnv):
         info["subgoal"] = self.curr_subgoal
         if self.curr_subgoal != prev_subgoal:
             self.subgoal_idxs.append(self.step_count)
-        info["subgoal_idxs"] = self.subgoal_idxs
-        
+        info["subgoal_idxs"] = self.subgoal_idxs   
+
 
         if self.enforce_full_episodes and self.step_count < HORIZON:
             terminated = torch.tensor([False], device=self.device)
+            
+        if self.is_state_based_policy:
+            obs, info = self._state_based_policy_obs(obs, info)
             
         return obs, reward, terminated, truncated, info
 

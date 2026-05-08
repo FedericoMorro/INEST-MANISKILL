@@ -36,7 +36,7 @@ import wandb
 #from configs import validate_config
 from inest_irl.utils.compute_learned_return import compute_avg_reward_metrics
 from inest_irl.utils.loggers import CSVLogger
-from inest_irl.utils.utils import setup_experiment
+from inest_irl.utils.utils import save_config, setup_experiment
 
 # pylint: disable=logging-fstring-interpolation
 
@@ -150,6 +150,16 @@ def main(_):
             max_num_frames = max(max_num_frames, num_frames)
     config.frame_sampler.num_frames_per_sequence = max_num_frames
     logging.info(f"Set frame_sampler.num_frames_per_sequence to {max_num_frames} based on the maximum number of frames in a video sequence in the dataset.")
+    
+  # get camera names
+  camera_names = []
+  train_data_path = osp.join(config.data.root, "train")
+  for class_name in os.listdir(train_data_path):
+    camera_names.append(class_name.removesuffix("-rgb"))
+  config.camera_names = camera_names
+  logging.info(f"Camera names found in dataset: {camera_names}")
+  
+  save_config(exp_dir, config)  # save the config to the experiment directory for future reference
 
   # Load factories.
   (

@@ -231,5 +231,6 @@ def get_config():
   # ============================================== #
   
   config.seed = None  #! do not set this here, it will be set in pretrain.py based on the command line argument
+  config.camera_names = []  #! this will be set in pretrain.py based on the dataset
 
   return config
