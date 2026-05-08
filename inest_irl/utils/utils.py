@@ -325,11 +325,14 @@ def wrap_env(env, reward_type, rank, train_flag, exp_dir, learned_reward_data):
     return wrappers.EnvironmentRewardStateIntrinsicWrapper(env, rank, train_flag, exp_dir)
   
   # goal distance learned reward wrappers
-  model = learned_reward_data["model"]
+  pretrained_path = learned_reward_data["pretrained_path"]
   device = learned_reward_data["device"]
   goal_emb = learned_reward_data["goal_emb"]
   dist_scale = learned_reward_data["dist_scale"]
-  camera_names = learned_reward_data["config"].camera_names
+  # load model
+  model, model_config, _model_step = load_model_checkpoint(pretrained_path, device)
+  camera_names = model_config.camera_names
+  
     
   if reward_type == "goal_dist":
     return wrappers.GoalDistanceLearnedVisualRewardWrapper(
@@ -445,8 +448,8 @@ def load_learned_reward_data(pretrained_path, device, data_dir=None):
     print(f"Computed and cached goal embedding at {cache_path}")
     
   return {
-    "model": model,
-    "config": model_config,
+    #"model": model,  # do not pass model, load in reward wrapper to avoid GPU memory issues and for efficiency
+    "pretrained_path": pretrained_path,
     "device": device,
     "goal_emb": goal_emb,
     "dist_scale": dist_scale,
