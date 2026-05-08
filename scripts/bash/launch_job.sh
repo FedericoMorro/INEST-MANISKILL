@@ -83,7 +83,7 @@ if [[ "$1" == "rl" ]]; then
     export TARGET_ENTROPY="-3.5"
     export STD_ACTION_NOISE="0.0"
     export ANNEAL_TARGET_ENTROPY="False"
-    export REWARD_WRAPPER_PRETRAINED_PATH="/home/fmorro/INEST-MANISKILL/experiments/opt_pretrain/bc-f40/bc-f40_000_b8_lr4e-04_wd3e-06_e128/"
+    export REWARD_WRAPPER_PRETRAINED_PATH="/home/fmorro/INEST-MANISKILL/experiments/pretrain/hcs1k_fr50_b16_x"
 
     manage_existing_exp_folder "${HOME}/INEST-MANISKILL/experiments/sb3/${EXPERIMENT_NAME}/${RND_SEED}"
     manage_existing_exp_folder "${HOME}/INEST-MANISKILL/experiments/lr-sb3/${EXPERIMENT_NAME}/${RND_SEED}"
@@ -94,7 +94,7 @@ if [[ "$1" == "rl" ]]; then
         --mem=64GB \
         --mail-type=ALL \
         --mail-user=federico.morro@polito.it \
-        --partition=gpu_a40 \
+        --partition=gpu_a40_ext \
         --gres=gpu:1 \
         --output=${HOME}/logs/%j_${EXPERIMENT_NAME}_inest.out \
         --error=${HOME}/logs/%j_${EXPERIMENT_NAME}_inest.err \

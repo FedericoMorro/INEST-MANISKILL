@@ -349,11 +349,11 @@ class StackPyramidEnv(BaseEnv):
     def _state_based_policy_obs(self, obs: dict, info: dict):
         # move sensor data to info, and leave state out of dict obs for state-based policy
         if "sensor_data" in obs:
-            info["sensor_data"] = obs.pop("sensor_data")
+            info["sensor_data"] = obs["sensor_data"]
         if "sensor_param" in obs:
-            info["sensor_param"] = obs.pop("sensor_param")
-        state = obs.pop("state")
-        return state, info  # to be interpreted as (obs, info)
+            info["sensor_param"] = obs["sensor_param"]
+        obs = obs["state"]
+        return obs, info
 
     def set_seed(self, seed):
         self.seed = seed
@@ -381,6 +381,9 @@ class StackPyramidEnv(BaseEnv):
         self.curr_subgoal = 0
         self.subgoal_idxs = []
         
+        # convert observation tensors to CPU for multiprocessing compatibility
+        obs = self._convert_obs_to_cpu(obs)
+        
         if self.is_state_based_policy:
             obs, info = self._state_based_policy_obs(obs, info)
 
@@ -403,14 +406,30 @@ class StackPyramidEnv(BaseEnv):
             self.subgoal_idxs.append(self.step_count)
         info["subgoal_idxs"] = self.subgoal_idxs   
 
-
         if self.enforce_full_episodes and self.step_count < HORIZON:
             terminated = torch.tensor([False], device=self.device)
             
+        # convert observation tensors to CPU for multiprocessing compatibility
+        obs = self._convert_obs_to_cpu(obs)
+        
         if self.is_state_based_policy:
             obs, info = self._state_based_policy_obs(obs, info)
+        
             
         return obs, reward, terminated, truncated, info
+    
+    
+    def _convert_obs_to_cpu(self, obs):
+        """Convert all tensors in observation to CPU numpy arrays for multiprocessing compatibility."""
+        if isinstance(obs, dict):
+            return {k: self._convert_obs_to_cpu(v) for k, v in obs.items()}
+        elif isinstance(obs, (list, tuple)):
+            return type(obs)(self._convert_obs_to_cpu(item) for item in obs)
+        elif isinstance(obs, torch.Tensor):
+            return obs.detach().cpu().numpy()
+        else:
+            return obs
+
 
 
     def _get_obs_extra(self, info: dict):
