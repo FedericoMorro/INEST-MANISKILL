@@ -74,6 +74,12 @@ class VideoDataset(Dataset):
 
     # Get list of available dirs and ensure that it is not empty.
     dirs = get_subdirs(self._root_dir, nonempty=True, sort_lexicographical=True)
+    
+    # remove metadata directories if they exist
+    for d in dirs:
+      if "metadata" in d.lower():
+        dirs.remove(d)
+        
     if not dirs:
       raise ValueError("{} is an empty directory.".format(root_dir))
     self._allowed_dirs = dirs

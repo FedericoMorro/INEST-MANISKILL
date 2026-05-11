@@ -37,6 +37,15 @@ def get_config():
   config.logging_frequency = 100
   # Number of steps between consecutive checkpoints.
   config.checkpointing_frequency = 200
+  
+  # Use multiple cameras in the dataset.
+  #   different classes in the dataset will be interpreted as different camera views of the same scene
+  #   the model will be duplicated and trained with a final fusion module
+  config.use_multiple_cameras = True
+  config.camera_names = [
+    "base_camera-rgb",
+    "hand_camera-rgb",
+  ]
 
   # ============================================== #
   # Dataset params.
@@ -47,12 +56,12 @@ def get_config():
   #INITIAL DATASET
   #config.data.root = "/tmp/xirl/xirl_dataset/xmagical"
   #SUBTASK DATASET
-  config.data.root = "/data/fmorro/inest-maniskill/datasets/dataset-bc-1000-states"
+  config.data.root = "/data/fmorro/inest-maniskill/datasets/dataset-bc+hc"
   # Absolute path to the dataset root.
   # The mini-batch size. Note this only specifies the number of videos to
   # load frames from in a single batch. The effective batch size is actually
   # larger since we sample multiple frame sequences per video.
-  config.data.batch_size = 4
+  config.data.batch_size = 2
   # Which action classes to select for creating the pretraining dataset. Leave
   # it empty to load all action classes.
   config.data.pretrain_action_class = ()
@@ -231,6 +240,5 @@ def get_config():
   # ============================================== #
   
   config.seed = None  #! do not set this here, it will be set in pretrain.py based on the command line argument
-  config.camera_names = []  #! this will be set in pretrain.py based on the dataset
 
   return config

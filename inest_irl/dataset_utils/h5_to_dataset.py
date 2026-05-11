@@ -47,6 +47,8 @@ The structure of the dataset is as follows:
       name/                           (by default, name of obs_key)
         traj-idx(s)/
           frame-idx(s).png
+      metadata/
+        traj-idx(s)/
           traj-idx_element(s).json -> list of lists
 """
 
@@ -56,6 +58,7 @@ Example usage:
 python inest_irl/dataset_utils/h5_to_dataset.py
     --h5_path ../data/maniskill/StackPyramid-v1_data.../trajectory...h5
     --dataset_path ../data/inest-maniskill/datasets/dataset...
+    [--config inest_irl/dataset_utils/configs_h5_to_dataset/maniskill_demos_merged.yaml]
     [--only_extract_subgoals]
 
 # for negative trajs
@@ -84,7 +87,7 @@ def _access_nested_group(group, key):
   return group
 
 
-def _save_data_as_json(group, keys, key_type, path, traj_idx):
+def _save_data_as_json(group, keys, key_type, path):
   if keys is None:
     return
   
@@ -92,27 +95,31 @@ def _save_data_as_json(group, keys, key_type, path, traj_idx):
     data = _access_nested_group(group, key)
     data_list = np.array(data).tolist()  # convert to list for json serialization
     key_prefix = f'{key_type}-' if key_type else ''
-    json_path = os.path.join(path, f'{traj_idx}_{key_prefix}{key.split("/")[-1]}.json')
+    json_path = os.path.join(path, f'{key_prefix}{key.split("/")[-1]}.json')
     with open(json_path, 'w') as f:
       json.dump(data_list, f)
 
 
-def handle_traj(group, path, idx, obs_key, action_keys, robot_state_keys, objects_state_keys):
+def handle_traj(group, path, idx, obs_keys, action_keys, robot_state_keys, objects_state_keys):
   # save a frame-idx.png for each frame in the trajectory
-  if obs_key is not None:
-    try:
-      obs = _access_nested_group(group, obs_key)
-      for i in range(obs.shape[0]):
-        frame_path = os.path.join(path, f'{i}.png')
-        Image.fromarray(obs[i]).save(frame_path)
-    except KeyError:
-      # Handle case where obs_key doesn't exist in this trajectory
-      pass
+  for obs_key in obs_keys:
+    # create folder for current obs to reach needed structure: dataset/train(or valid)/obs_key/trajectory_idx/frame_idx.png
+    folder_name = f'{obs_key.split("/")[-2]}-{obs_key.split("/")[-1]}'
+    curr_obs_path = os.path.join(os.path.join(path, folder_name), idx)
+    os.makedirs(curr_obs_path, exist_ok=True)
+    # access the observation data and save each frame as a png image in the corresponding folder
+    obs = _access_nested_group(group, obs_key)
+    for i in range(obs.shape[0]):
+      frame_path = os.path.join(curr_obs_path, f'{i}.png')
+      Image.fromarray(obs[i]).save(frame_path)
     
-  # save a traj-idx_element.json for each trajectory element
-  _save_data_as_json(group, action_keys, None, path, idx)
-  _save_data_as_json(group, robot_state_keys, 'robot', path, idx)
-  _save_data_as_json(group, objects_state_keys, 'objects', path, idx)
+  # save a traj-idx_element.json for each trajectory element in dataset/train(or valid)/metadata/trajectory_idx/traj-idx_element.json
+  metadata_path = os.path.join(os.path.join(path, "metadata"), idx)
+  os.makedirs(metadata_path, exist_ok=True)
+  # handle each metadata type
+  _save_data_as_json(group, action_keys, None, metadata_path)
+  _save_data_as_json(group, robot_state_keys, 'robot', metadata_path)
+  _save_data_as_json(group, objects_state_keys, 'objects', metadata_path)
 
 
 def main(args):
@@ -123,7 +130,7 @@ def main(args):
   with open(args.config, 'r') as f:
     config = yaml.safe_load(f)
   
-  obs_key = config['obs_key']
+  obs_keys = config['obs_keys']
   action_keys = config['action_keys']
   robot_state_keys = config['robot_state_keys']
   objects_state_keys = config['objects_state_keys']
@@ -134,18 +141,11 @@ def main(args):
   os.makedirs(args.dataset_path, exist_ok=True)
   print(f'Dataset will be saved to: {args.dataset_path}')
 
-  # create needed nesting
-  if obs_key is not None:
-    name = f'{obs_key.split("/")[-2]}-{obs_key.split("/")[-1]}'
-  else:
-    name = 'data'
-
+  # create train and valid folders
   train_path = os.path.join(args.dataset_path, 'train')
-  train_path = os.path.join(train_path, name)
   os.makedirs(train_path, exist_ok=True)
 
   valid_path = os.path.join(args.dataset_path, 'valid')
-  valid_path = os.path.join(valid_path, name)
   os.makedirs(valid_path, exist_ok=True)
 
   # open and read the h5 file
@@ -161,14 +161,13 @@ def main(args):
     # create trajectory folder
     traj_idx = traj_name.split('_')[-1]
     if np.random.rand() < config['train_split']:
-      traj_path = os.path.join(train_path, traj_idx)
+      traj_path = train_path
     else:
-      traj_path = os.path.join(valid_path, traj_idx)
-    os.makedirs(traj_path, exist_ok=True)
+      traj_path = valid_path
 
     # handle trajectory data
     if not args.only_extract_subgoals:
-      handle_traj(traj_group, traj_path, traj_idx, obs_key, action_keys, robot_state_keys, objects_state_keys)
+      handle_traj(traj_group, traj_path, traj_idx, obs_keys, action_keys, robot_state_keys, objects_state_keys)
     
     try:
       subgoal_data[int(traj_idx)] = np.array(_access_nested_group(traj_group, 'obs/extra/subgoal')).tolist()

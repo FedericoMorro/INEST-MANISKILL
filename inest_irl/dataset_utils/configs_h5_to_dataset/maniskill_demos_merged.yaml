@@ -5,7 +5,9 @@
 train_split: 0.9
 
 # Path to observation images
-obs_key: 'obs/sensor_data/hand_camera/rgb'
+obs_keys:
+  - 'obs/sensor_data/base_camera/rgb'
+  - 'obs/sensor_data/hand_camera/rgb'
 
 # Action keys to extract
 action_keys:

@@ -152,12 +152,16 @@ def main(_):
     logging.info(f"Set frame_sampler.num_frames_per_sequence to {max_num_frames} based on the maximum number of frames in a video sequence in the dataset.")
     
   # get camera names
-  camera_names = []
+  found_camera_names = []
   train_data_path = osp.join(config.data.root, "train")
   for class_name in os.listdir(train_data_path):
-    camera_names.append(class_name.removesuffix("-rgb"))
-  config.camera_names = camera_names
-  logging.info(f"Camera names found in dataset: {camera_names}")
+    if "metadata" in class_name.lower():
+      continue
+    found_camera_names.append(class_name)
+    
+  if set(config.camera_names) != set(found_camera_names):
+    raise ValueError(f"Camera names found in the dataset {found_camera_names} do not match the camera names specified"
+                     f"in the config {config.camera_names}. Please make sure to set config.camera_names to match the camera views in the dataset.")
   
   save_config(exp_dir, config)  # save the config to the experiment directory for future reference
 

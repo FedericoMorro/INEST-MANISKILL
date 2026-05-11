@@ -104,9 +104,13 @@ def get_factories(
     debug = False,
 ):
   """Feed config to factories and return objects."""
-  pretrain_loaders = get_pretraining_dataloaders(config, debug)
-  downstream_loaders = get_downstream_dataloaders(config, debug)
-  model = factory.model_from_config(config)
+  if not config.use_multiple_cameras:
+    pretrain_loaders = get_pretraining_dataloaders(config, debug)
+    downstream_loaders = get_downstream_dataloaders(config, debug)
+    model = factory.model_from_config(config)
+  else:
+    from xirl.multiple_cameras import get_factories_mc
+    pretrain_loaders, downstream_loaders, model = get_factories_mc(config, debug)
 
   # if torch.cuda.device_count() > 1:
   #     logging.info("Using %d GPUs with DataParallel", torch.cuda.device_count())
@@ -148,4 +152,8 @@ def get_factories(
 
 def get_model(config):
   """Construct a model from a config."""
-  return factory.model_from_config(config)
+  if not config.use_multiple_cameras:
+    return factory.model_from_config(config)
+  else:
+    from xirl.multiple_cameras import get_model_mc
+    return get_model_mc(config)
