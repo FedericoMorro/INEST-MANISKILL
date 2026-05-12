@@ -219,10 +219,17 @@ class VideoDataset(Dataset):
   @property
   def total_vids(self):
     """The total number of videos across all allowed video classes."""
+    if hasattr(self, "_total_vids"):
+      return self._total_vids
+    
     num_vids = 0
     for vids in self._dir_tree.values():
       num_vids += len(vids)
     return num_vids
+  
+  @total_vids.setter
+  def total_vids(self, value):
+    self._total_vids = value
 
   @property
   def dir_tree(self):

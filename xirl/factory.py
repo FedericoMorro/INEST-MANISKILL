@@ -228,7 +228,7 @@ def video_sampler_from_config(config, dir_tree, downstream, sequential):
   return VIDEO_SAMPLERS[config.data.pretraining_video_sampler](**kwargs)
 
 
-def dataset_from_config(config, downstream, split, debug):
+def dataset_from_config(config, downstream, split, debug, multi_camera=False):
   """Create a video dataset from a config."""
   dataset_path = osp.join(config.data.root, split)
 
@@ -276,7 +276,8 @@ def dataset_from_config(config, downstream, split, debug):
 
   # We need to separate out the dataclasses for each action class when
   # creating downstream datasets.
-  if downstream:
+  #   if multi_camera downstream, return single dataset for all classes with downstream frame sampler (i.e. full trajs)
+  if downstream and not multi_camera:
     dataset = {}
     for action_class in action_classes:
       frame_sampler = frame_sampler_from_config(config, downstream=True)
@@ -290,7 +291,7 @@ def dataset_from_config(config, downstream, split, debug):
       single_class_dataset.restrict_subdirs(action_class)
       dataset[action_class] = single_class_dataset
   else:
-    frame_sampler = frame_sampler_from_config(config, downstream=False)
+    frame_sampler = frame_sampler_from_config(config, downstream=(multi_camera and downstream))
     dataset = VideoDataset(
         dataset_path,
         frame_sampler,

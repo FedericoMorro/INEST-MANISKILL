@@ -42,6 +42,10 @@ def get_pretraining_dataloaders(
   Returns:
     A dict of train/valid pretraining dataloaders.
   """
+  
+  if config.use_multiple_cameras:
+    from xirl.multiple_cameras import get_dataloaders_mc
+    return get_dataloaders_mc(config, downstream=False, debug=debug)
 
   def _loader(split):
     dataset = factory.dataset_from_config(config, False, split, debug)
@@ -76,6 +80,10 @@ def get_downstream_dataloaders(
   Returns:
     A dict of train/valid downstream dataloaders
   """
+  
+  if config.use_multiple_cameras:
+    from xirl.multiple_cameras import get_dataloaders_mc
+    return get_dataloaders_mc(config, downstream=True, debug=debug)
 
   def _loader(split):
     datasets = factory.dataset_from_config(config, True, split, debug)

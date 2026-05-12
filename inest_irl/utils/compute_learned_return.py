@@ -134,7 +134,7 @@ def compute_goal_embedding(model, train_loader, subgoal_frames, device):
 
   # get init, goal (final), and subgoals embeddings for each trajectory in the training set
   for class_name, class_loader in train_loader.items():
-    for batch in tqdm(iter(class_loader), leave=False, desc=f"Embedding {class_name}"):
+    for batch in tqdm(iter(class_loader), leave=True, desc=f"Embedding {class_name}"):
       out = model.infer(batch["frames"].to(device))   # batch_size=1 since hardcoded in downstream dataloader
       emb = out.numpy().embs  # shape: (seq_len, embedding_dim)
       
@@ -196,7 +196,7 @@ def compute_reward_signals(model, valid_loader, goal_emb, subgoal_embs, dist_sca
   subgoal_reachs_gt = None
   
   for class_name, class_loader in valid_loader.items():
-    for batch in tqdm(iter(class_loader), leave=False, desc=f"Computing rewards for {class_name}"):
+    for batch in tqdm(iter(class_loader), leave=True, desc=f"Computing rewards for {class_name}"):
       traj_id = batch["video_name"][0].split('/')[-1]
       traj_ids.append(traj_id)
       out = model.infer(batch["frames"].to(device))

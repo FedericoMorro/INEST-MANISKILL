@@ -3,7 +3,7 @@ import os
 import torch
 import torch.nn as nn
 
-from xirl.dataset import SequenceType
+from xirl.dataset import VideoDataset, SequenceType
 import xirl.factory as factory
 from xirl.models import SelfSupervisedModel, SelfSupervisedOutput
 import xirl.video_samplers as video_samplers
@@ -32,24 +32,23 @@ class MultipleCamerasModel(SelfSupervisedModel):
         )
         
     def forward(self, inputs):
-        # inputs is a tensor with shape (num_cameras, batch_size, num_frames, channels, height, width)
-        # where cameras are ordered by their sorted names
-        embeddings = []
-        num_cameras, batch_size, num_frames, channels, height, width = inputs.shape
+        # inputs is a tensor with shape (batch_size, num_cameras, num_frames, channels, height, width)
+        batch_size, num_cameras, num_frames, channels, height, width = inputs.shape
         
+        embeddings = []
         for camera_idx in range(num_cameras):
-            camera_input = inputs[camera_idx]
+            # Extract frames for this camera: shape (batch_size, num_frames, channels, height, width)
+            camera_input = inputs[:, camera_idx, :, :, :, :]
             encoder_key = self.sorted_camera_names[camera_idx]
-            camera_emb = self.encoders[encoder_key](camera_input).embs      # output is SelfSupervisedOutput type
+            camera_emb = self.encoders[encoder_key](camera_input).embs  # (batch_size, num_frames, embedding_dim)
             embeddings.append(camera_emb)
         
-        # concatenate embeddings from different cameras and pass through fusion module
+        # concatenate embeddings from different cameras: (batch_size, num_frames, num_cameras * embedding_dim)
         concat_emb = torch.cat(embeddings, dim=-1)
-        fused_emb = self.fusion_module(concat_emb)
+        fused_emb = self.fusion_module(concat_emb)  # (batch_size, num_frames, embedding_dim)
         
-        # reshape frames from (num_cameras, batch, frames, channels, H, W) to (batch, frames, num_cameras*channels, H, W)
-        # permute to (batch, frames, num_cameras, channels, H, W) then reshape
-        frames_reshaped = inputs.permute(1, 2, 0, 3, 4, 5).reshape(batch_size, num_frames, -1, height, width)
+        # reshape frames from (batch_size, num_cameras, num_frames, C, H, W) to (batch_size, num_frames, num_cameras*C, H, W)
+        frames_reshaped = inputs.permute(0, 2, 1, 3, 4, 5).reshape(batch_size, num_frames, -1, height, width)
         
         return SelfSupervisedOutput(frames=frames_reshaped, feats=concat_emb, embs=fused_emb)
     
@@ -62,12 +61,16 @@ class MultipleCamerasMatchedBatchSampler(video_samplers.VideoBatchSampler):
     e.g. batch_size=3, 2 cameras -> [(0,5), (1,5), (0,6), (1,6), (0,7), (1,7)]
     """
     
-    def __init__(self, num_cameras, **kwargs):
+    def __init__(self, num_cameras, data_len, **kwargs):
         super().__init__(**kwargs)
         self.num_cameras = num_cameras
+        self.data_len = data_len
+
+    def __len__(self):
+        return self.data_len
     
     def _generate_indices(self):
-        # Get video lists for each camera (assumed to be in consistent order)
+        # get video lists for each camera (assumed to be in consistent order)
         camera_sequences = {}
         camera_paths = sorted(self._dir_tree.keys())
         
@@ -112,7 +115,7 @@ def collate_fn_multiple_cameras(batch, num_cameras):
     [cam0_item0, cam1_item0, ..., camN_item0, cam0_item1, cam1_item1, ...]
     
     Returns a dict with:
-    - "frames": stacked frames tensor with shape (num_cameras, batch_size, ...)
+    - "frames": stacked frames tensor with shape (batch_size, num_cameras, ...)
     - "frame_idxs": frame indices with shape (batch_size,) [same across cameras]
     - "video_len": video lengths with shape (batch_size,) [same across cameras]
     - "video_names": list of video names [same across cameras]
@@ -142,9 +145,9 @@ def collate_fn_multiple_cameras(batch, num_cameras):
         camera_data = _collate_camera_items(camera_items[camera_idx])
         all_camera_frames.append(camera_data[str(SequenceType.FRAMES)])
     
-    # stack frames: (num_cameras, batch_size, ...)
+    # stack frames: (batch_size, num_cameras, ...) instead of (num_cameras, batch_size, ...)
     output = {
-        str(SequenceType.FRAMES): torch.stack(all_camera_frames, dim=0),
+        str(SequenceType.FRAMES): torch.stack(all_camera_frames, dim=1),
         str(SequenceType.FRAME_IDXS): _collate_camera_items(camera_items[0])[str(SequenceType.FRAME_IDXS)],
         str(SequenceType.VIDEO_LEN): _collate_camera_items(camera_items[0])[str(SequenceType.VIDEO_LEN)],
         str(SequenceType.VIDEO_NAME): _collate_camera_items(camera_items[0])[str(SequenceType.VIDEO_NAME)],
@@ -163,9 +166,16 @@ def get_dataloaders_mc(config, downstream=False, debug=False):
     """
     
     def _loader(split):
-        dataset = factory.dataset_from_config(config, False, split, debug)
+        # for pretraining, use frame sampler (downstream=False), for downstream, request full trajectories (downstream=True)
+        dataset = factory.dataset_from_config(config, downstream, split, debug, multi_camera=True)
         
         num_cameras = len(config.camera_names)
+        
+        # dataset.py: VideoDataset.total_vids (220)
+        #   override value by dividing it by the number of cameras, since each video is duplicated across cameras in the dataset
+        #   and the count is performed directly on the dir_tree which contains all cameras' videos
+        #   then enforce len also in loader
+        dataset.total_vids = dataset.total_vids // num_cameras
         
         kwargs = {
             "dir_tree": dataset.dir_tree,
@@ -175,7 +185,7 @@ def get_dataloaders_mc(config, downstream=False, debug=False):
         if downstream:
             kwargs["batch_size"] = 1
         
-        batch_sampler = MultipleCamerasMatchedBatchSampler(num_cameras, **kwargs)
+        batch_sampler = MultipleCamerasMatchedBatchSampler(num_cameras, len(dataset), **kwargs)
         
         # create collate function with num_cameras bound
         collate_fn = lambda batch: collate_fn_multiple_cameras(batch, num_cameras)
