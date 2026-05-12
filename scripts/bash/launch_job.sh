@@ -74,16 +74,16 @@ if [[ "$1" == "rl" ]]; then
 
     export REWARD_WRAPPER_TYPE="goal_dist"
     export REWARD_SCALING="1.0"
-    export ENV_RANDOMIZATION="same-seed"
+    export ENV_RANDOMIZATION="default"
     export REPLAY_BUFFER_CAPACITY="1_000_000"
     export ACTOR_LR="3e-4"
     export CRITIC_LR="1e-4"
     export ALPHA_LR="3e-4"
-    export DISCOUNT="0.9"
+    export DISCOUNT="0.95"
     export TARGET_ENTROPY="-3.5"
     export STD_ACTION_NOISE="0.0"
     export ANNEAL_TARGET_ENTROPY="False"
-    export REWARD_WRAPPER_PRETRAINED_PATH="/home/fmorro/INEST-MANISKILL/experiments/pretrain/hcs1k_fr50_b16_x"
+    export REWARD_WRAPPER_PRETRAINED_PATH="/home/fmorro/INEST-MANISKILL/experiments/pretrain/bc+hc_b16_fr40/"
 
     manage_existing_exp_folder "${HOME}/INEST-MANISKILL/experiments/sb3/${EXPERIMENT_NAME}/${RND_SEED}"
     manage_existing_exp_folder "${HOME}/INEST-MANISKILL/experiments/lr-sb3/${EXPERIMENT_NAME}/${RND_SEED}"
@@ -94,7 +94,7 @@ if [[ "$1" == "rl" ]]; then
         --mem=64GB \
         --mail-type=ALL \
         --mail-user=federico.morro@polito.it \
-        --partition=gpu_a40_ext \
+        --partition=gpu_a40 \
         --gres=gpu:1 \
         --output=${HOME}/logs/%j_${EXPERIMENT_NAME}_inest.out \
         --error=${HOME}/logs/%j_${EXPERIMENT_NAME}_inest.err \
@@ -105,7 +105,7 @@ if [[ "$1" == "rl" ]]; then
 elif [[ "$1" == "pretrain" || "$1" == "opt-pretrain" ]]; then
     echo "Submitting INEST MANISKILL pretraining job..."
 
-    DATASET_PATH="/home/fmorro/data/inest-maniskill/dataset-hc-1000-states"
+    DATASET_PATH="/home/fmorro/data/inest-maniskill/dataset-bc+hc"
 
     # copy dataset to SCRATCH_FLASH for faster access during training (if already present ask user)
     export SCRATCH_FLASH_DATASET_PATH="${SCRATCH_FLASH}/$(basename ${DATASET_PATH})"
@@ -117,7 +117,7 @@ elif [[ "$1" == "pretrain" || "$1" == "opt-pretrain" ]]; then
 
         export BATCH_SIZE="16"
         export TRAIN_MAX_ITERS="10_000"
-        export NUM_FRAMES_PER_SEQUENCE="50"
+        export NUM_FRAMES_PER_SEQUENCE="40"
 
         manage_existing_exp_folder "${HOME}/INEST-MANISKILL/experiments/pretrain/${EXPERIMENT_NAME}"
 
@@ -127,7 +127,7 @@ elif [[ "$1" == "pretrain" || "$1" == "opt-pretrain" ]]; then
             --mem=32GB \
             --mail-type=ALL \
             --mail-user=federico.morro@polito.it \
-            --partition=gpu_a40_ext \
+            --partition=gpu_a40 \
             --gres=gpu:1 \
             --output=${HOME}/logs/%j_${EXPERIMENT_NAME}_pretrain.out \
             --error=${HOME}/logs/%j_${EXPERIMENT_NAME}_pretrain.err \
@@ -136,7 +136,7 @@ elif [[ "$1" == "pretrain" || "$1" == "opt-pretrain" ]]; then
 
 
     else # opt-pretrain
-        echo "Sumitting optuna hyperparameter optimization job..."
+        echo "Submitting optuna hyperparameter optimization job..."
 
         manage_existing_exp_folder "${HOME}/INEST-MANISKILL/experiments/opt_pretrain/${EXPERIMENT_NAME}"
 

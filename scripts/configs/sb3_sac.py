@@ -44,7 +44,7 @@ def get_config():
   config.reward_scaling = 1.0
   
   # camera for rendering videos
-  config.render_camera = "hand_camera"
+  config.render_camera = "base_camera"
   # the list of cameras used as input to the reward model, if using a vision-based reward wrapper, will be automatically
   #   populated based on the config of the pretrained reward model
   

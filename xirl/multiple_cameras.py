@@ -1,4 +1,5 @@
 from absl import logging
+from copy import copy
 import os
 import torch
 import torch.nn as nn
@@ -20,16 +21,24 @@ class MultipleCamerasModel(SelfSupervisedModel):
         self.sorted_camera_names = sorted(config.camera_names)
         
         # create separate encoders for each camera, keyed by name
+        enc_config = copy(config)
+        enc_config.model.normalize_embeddings = True
+        
         self.encoders = nn.ModuleDict({})
         for camera_name in self.sorted_camera_names:
-            self.encoders[camera_name] = factory.model_from_config(config)
+            self.encoders[camera_name] = factory.model_from_config(enc_config)
         
         # simple fusion module that concatenates the embeddings and passes through an MLP
-        self.fusion_module = nn.Sequential(
-            nn.Linear(len(self.sorted_camera_names) * config.model.embedding_size, config.model.embedding_size),
+        n_cams, emb_size = len(self.sorted_camera_names), config.model.embedding_size
+        fusion_layers = [
+            nn.Linear(n_cams * emb_size, emb_size * 2),
             nn.ReLU(),
-            nn.Linear(config.model.embedding_size, config.model.embedding_size),
-        )
+            nn.Linear(emb_size * 2, emb_size),
+        ]
+        if config.model.normalize_embeddings:
+            fusion_layers.append(nn.LayerNorm(emb_size))
+        
+        self.fusion_module = nn.Sequential(*fusion_layers)
         
     def forward(self, inputs):
         # inputs is a tensor with shape (batch_size, num_cameras, num_frames, channels, height, width)
@@ -37,8 +46,8 @@ class MultipleCamerasModel(SelfSupervisedModel):
         
         embeddings = []
         for camera_idx in range(num_cameras):
-            # Extract frames for this camera: shape (batch_size, num_frames, channels, height, width)
-            camera_input = inputs[:, camera_idx, :, :, :, :]
+            # extract frames for this camera: shape (batch_size, num_frames, channels, height, width)
+            camera_input = inputs[:, camera_idx, :, :, :, :].contiguous()
             encoder_key = self.sorted_camera_names[camera_idx]
             camera_emb = self.encoders[encoder_key](camera_input).embs  # (batch_size, num_frames, embedding_dim)
             embeddings.append(camera_emb)
