@@ -423,12 +423,17 @@ class LearnedVisualRewardWrapper(RewardWrapper):
         super().__init__(*args, **kwargs)
         self.device = device
         self.model = model.to(device).eval()
-        self.camera_names = camera_names
+        self.camera_names = [cam.removesuffix("-rgb") for cam in camera_names]  # remove potential suffix to get base camera name
         self.res_hw = res_hw
         print(f"Initialized LearnedVisualRewardWrapper with model {model.__class__.__name__} on device {device} and res_hw={res_hw}")
 
     def _to_tensor(self, x):
-        x = torch.from_numpy(x).permute(2, 0, 1).float()[None, None, Ellipsis]
+        # legend: Height, Width, Channels, Num_Cameras, batch, time
+        if len(x.shape) == 3:
+            x = torch.from_numpy(x).permute(2, 0, 1).float()[None, None, Ellipsis]  # (H, W, C) -> (b, t, C, H, W)
+        else:
+            x = torch.from_numpy(x).permute(0, 3, 1, 2).float()[None, Ellipsis] # (NC, H, W, C) -> (t, NC, C, H, W)
+            x = x.permute(1, 0, 2, 3, 4)[None, Ellipsis]    # (t, NC, C, H, W) -> (b, NC, t, C, H, W)
         # TODO(kevin): Make this more generic for other preprocessing.
         x = x / 255.0
         x = x.to(self.device)
@@ -486,6 +491,16 @@ class LearnedVisualRewardWrapper(RewardWrapper):
     def _get_reward_from_image(self, image):
         """Forward the pixels through the model and compute the reward."""
         
+    def _prepare_pixels_for_model(self, info):
+        """Adjust and wrap image pixels for model input."""
+        if len(self.camera_names) > 1:
+            return np.array([
+                self._adjust_obs(info['sensor_data'][self.camera_names[i]])
+                for i in range(len(self.camera_names))
+            ])
+        else:
+            return self._adjust_obs(info['sensor_data'][self.camera_names[0]])
+        
     def reset(self, *args, **kwargs):
         self.cum_env_reward = 0.0
         return super().reset(*args, **kwargs)
@@ -496,8 +511,7 @@ class LearnedVisualRewardWrapper(RewardWrapper):
         self.cum_env_reward += reward
         info["cum_env_reward"] = self.cum_env_reward
         
-        #! currently only support using one camera for reward computation, can be extended to multi-cam if needed
-        pixels = self._adjust_obs(info['sensor_data'][self.camera_names[0]])
+        pixels = self._prepare_pixels_for_model(info)
         learned_reward = self._get_reward_from_image(pixels)
         
         return obs, learned_reward, terminated, truncated, info

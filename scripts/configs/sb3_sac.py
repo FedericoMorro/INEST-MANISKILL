@@ -56,7 +56,7 @@ def get_config():
   #   currently supported -> ['sparse', 'env', 'env_state-intrinsic', 'goal_dist', 'subgoal-dist']
   config.reward_wrapper.type = "goal_dist"
   # Needed if using a vision-based learned reward wrapper
-  config.reward_wrapper.pretrained_path = "/data/fmorro/inest-maniskill/_experiments/pretrain/rcs1k_fr50_b16/"
+  config.reward_wrapper.pretrained_path = "/data/fmorro/inest-maniskill/_experiments/pretrain/bc+hc_b16_fr40"
 
   # Number of parallel environments to use for training
   config.num_envs = 32
