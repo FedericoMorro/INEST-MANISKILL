@@ -504,7 +504,7 @@ def main(_):
         
         # only one eval episode, since all episodes will be the same + more frequent evaluation, since less expensive
         config.num_eval_episodes = 1
-        config.eval_frequency /= 4
+        config.eval_frequency //= 4
 
     # Load environments
     logging.info(f"Creating {config.num_envs} environment(s)...")

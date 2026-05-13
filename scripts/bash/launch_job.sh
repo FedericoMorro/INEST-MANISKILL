@@ -72,9 +72,9 @@ manage_scratch_flash_folder() {
 if [[ "$1" == "rl" ]]; then
     echo "Submitting INEST MANISKILL RL training job..."
 
-    export REWARD_WRAPPER_TYPE="goal_dist"
+    export REWARD_WRAPPER_TYPE="subgoal_dist"
     export REWARD_SCALING="1.0"
-    export ENV_RANDOMIZATION="default"
+    export ENV_RANDOMIZATION="same-seed"
     export REPLAY_BUFFER_CAPACITY="1_000_000"
     export ACTOR_LR="3e-4"
     export CRITIC_LR="1e-4"
@@ -83,7 +83,7 @@ if [[ "$1" == "rl" ]]; then
     export TARGET_ENTROPY="-3.5"
     export STD_ACTION_NOISE="0.0"
     export ANNEAL_TARGET_ENTROPY="False"
-    export REWARD_WRAPPER_PRETRAINED_PATH="/home/fmorro/INEST-MANISKILL/experiments/pretrain/bc+hc_b16_fr40/"
+    export REWARD_WRAPPER_PRETRAINED_PATH="/home/fmorro/INEST-MANISKILL/experiments/pretrain/bc+hc_b16_fr40_fus/"
 
     manage_existing_exp_folder "${HOME}/INEST-MANISKILL/experiments/sb3/${EXPERIMENT_NAME}/${RND_SEED}"
     manage_existing_exp_folder "${HOME}/INEST-MANISKILL/experiments/lr-sb3/${EXPERIMENT_NAME}/${RND_SEED}"
