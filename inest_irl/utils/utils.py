@@ -358,7 +358,7 @@ def wrap_env(env, reward_type, rank, train_flag, exp_dir, learned_reward_data):
       env=env, rank=rank, train_flag=train_flag, exp_dir=exp_dir,
       model=model, device=device, #res_hw=model_config.data_augmentation.image_size,  -> should be already 128x128
       camera_names=camera_names,
-      subgoal_embs=subgoal_embs, dist_scale=dist_scale, subgoal_info=subgoal_info,
+      goal_emb=goal_emb,subgoal_embs=subgoal_embs, dist_scale=dist_scale, subgoal_info=subgoal_info,
     )
   else:
      raise NotImplementedError(f"Reward wrapper type {reward_type} not implemented yet.")
