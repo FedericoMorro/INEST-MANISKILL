@@ -501,6 +501,10 @@ def main(_):
         logging.info(f"Using same-seed randomization with seed {config.same_seed_randomization}. Setting base and eval seeds to {config.same_seed_randomization}.")
         base_seed = config.same_seed_randomization
         eval_seed = config.same_seed_randomization
+        
+        # only one eval episode, since all episodes will be the same + more frequent evaluation, since less expensive
+        config.num_eval_episodes = 1
+        config.eval_frequency /= 4
 
     # Load environments
     logging.info(f"Creating {config.num_envs} environment(s)...")

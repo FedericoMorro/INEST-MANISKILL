@@ -6,6 +6,7 @@ Example usage:
 python inest_irl/utils/compute_learned_return.py
     --experiment_path ../data/inest-maniskill/_experiments/pretrain/render-cam/
     [--cache_only]
+    [--overwrite]
     [--data_root ../data/inest-maniskill/datasets/dataset-rc-1000-states]
     [--plot_subgoal_dists]
 
@@ -43,7 +44,7 @@ DataLoaderType = typing.Dict[str, torch.utils.data.DataLoader]
 
 
 C_VALUE = 0.25   # additional reward for reaching any subgoal
-DISTANCE_THRESHOLDS = [3, 3, 3, 3]  # distance threshold for considering a subgoal reached (in embedding space)
+DISTANCE_THRESHOLDS = [0.5, 0.5, 0.5, 0.5]  # distance threshold for considering a subgoal reached (in embedding space)
 PATIENCE_THRESHOLD = 2  # number of consecutive timesteps below distance threshold to consider subgoal reached
 
 # report-friendly plotting defaults (compact figure size with readable text)
@@ -178,9 +179,9 @@ def compute_goal_embedding(model, train_loader, subgoal_frames, device):
   
   # add subgoal info for pickling, used by wrapper in rl training
   subgoal_info = {
-    "c_value": 0.25,
-    "distance_thresholds": [3.0, 3.0, 3.0, 3.0],
-    "patience_threshold": 0,
+    "c_value": C_VALUE,
+    "distance_thresholds": DISTANCE_THRESHOLDS,
+    "patience_threshold": PATIENCE_THRESHOLD,
   }
   
   return goal_emb, subgoal_embs, dist_scale, subgoal_info
@@ -212,12 +213,13 @@ def compute_reward_signals(model, valid_loader, goal_emb, subgoal_embs, dist_sca
       if subgoal_embs is not None:
         
         # get ground truth subgoal indices from data, or from subgoal frames if available
-        subogal_reachs_gt_path = Path(f"{batch['video_name'][0]}/{traj_id}_subgoal_idxs.json")
-        if subogal_reachs_gt_path.exists():
-          with open(subogal_reachs_gt_path, 'r') as f:
-            gt_subgoal_idxs = json.load(f)
-        elif subgoal_frames is not None and traj_id in subgoal_frames:
+        if subgoal_frames is not None and traj_id in subgoal_frames:
           gt_subgoal_idxs = subgoal_frames[traj_id]
+          
+        elif Path(f"{batch['video_name'][0]}/{traj_id}_subgoal_idxs.json").exists():
+          with open(Path(f"{batch['video_name'][0]}/{traj_id}_subgoal_idxs.json"), 'r') as f:
+            gt_subgoal_idxs = json.load(f)
+            
         else:
           gt_subgoal_idxs = None
           
@@ -453,26 +455,24 @@ def plot_trajectory_samples(rewards, traj_ids, output_dir, subgoal_reachs, label
       # Plot GT subgoal in purple if available
       if subgoal_reachs_gt is not None and len(subgoal_reachs_gt) > 0:
         subgoal_idx = 0
-        if subgoal_idx < len(subgoal_reachs_gt) and idx < len(subgoal_reachs_gt[subgoal_idx]):
-          step = subgoal_reachs_gt[subgoal_idx][idx]
-          if not np.isnan(step) and step >= 0 and step < len(sample_reward):
-            ax.axvline(step, color='purple', linestyle=':', linewidth=1.7, alpha=0.9, label='Reached Subgoal (GT)')
-            # Mark intersection point
-            if show_intersection:
-              val_at_reach = sample_reward[int(step)]
-              ax.plot(int(step), val_at_reach, 'o', color='purple', markersize=4, zorder=5)
+        step = subgoal_reachs_gt[subgoal_idx][idx]
+        if not np.isnan(step) and step >= 0 and step < len(sample_reward):
+          ax.axvline(step, color='purple', linestyle=':', linewidth=1.7, alpha=0.9, label='Reached Subgoal (GT)')
+          # Mark intersection point
+          if show_intersection:
+            val_at_reach = sample_reward[int(step)]
+            ax.plot(int(step), val_at_reach, 'o', color='purple', markersize=4, zorder=5)
       
       # Plot detected subgoal in green if available
       if subgoal_reachs is not None and len(subgoal_reachs) > 0:
         subgoal_idx = 0
-        if subgoal_idx < len(subgoal_reachs) and idx < len(subgoal_reachs[subgoal_idx]):
-          step = subgoal_reachs[subgoal_idx][idx]
-          if not np.isnan(step) and step >= 0 and step < len(sample_reward):
-            ax.axvline(step, color='green', linestyle='--', linewidth=1.7, alpha=0.9, label='Reached Subgoal (Detected)')
-            # Mark intersection point
-            if show_intersection:
-              val_at_reach = sample_reward[int(step)]
-              ax.plot(int(step), val_at_reach, 'o', color='green', markersize=4, zorder=5)
+        step = subgoal_reachs[subgoal_idx][idx]
+        if not np.isnan(step) and step >= 0 and step < len(sample_reward):
+          ax.axvline(step, color='green', linestyle='--', linewidth=1.7, alpha=0.9, label='Reached Subgoal (Detected)')
+          # Mark intersection point
+          if show_intersection:
+            val_at_reach = sample_reward[int(step)]
+            ax.plot(int(step), val_at_reach, 'o', color='green', markersize=4, zorder=5)
     else:
       # For other plots (rewards), show all subgoals with both GT and detected
       # Plot GT subgoals in purple if available
@@ -738,16 +738,15 @@ def main(args):
                      subgoal_reachs_gt=subgoal_reachs_gt, show_intersection=False)
     save_reward_metrics(subgoal_rewards, os.path.join(out_dir, 'subgoal_reward_metrics.json'), avg=True)
     
+    # save .json with detected and GT subgoal reaching timesteps for each trajectory
+    save_subgoal_idxs(subgoal_reachs, traj_ids, os.path.join(out_dir, 'subgoal_idxs.json'), subgoal_reachs_gt=subgoal_reachs_gt)
+    
     for i, subgoal_dist in enumerate(subgoal_dists):
-      # For distance plots, plot both GT and detected with intersection data
+      # for distance plots, plot both GT and detected with intersection data
       plot_mean_results(subgoal_dist, out_dir, [subgoal_reachs[i]] if subgoal_reachs else None, 
                        label=f"Distance to Subgoal {i+1}", detected_flags=None, 
                        subgoal_reachs_gt=[subgoal_reachs_gt[i]] if subgoal_reachs_gt else None,
                        show_intersection=True)
-    
-    # save .json with detected and GT subgoal reaching timesteps for each trajectory
-    save_subgoal_idxs(subgoal_reachs, traj_ids, os.path.join(out_dir, 'subgoal_idxs.json'), subgoal_reachs_gt=subgoal_reachs_gt)
-    
     
   # plot trajectory-wise curves, and save per-trajectory reward metrics
   if not args.no_plot_trajs:

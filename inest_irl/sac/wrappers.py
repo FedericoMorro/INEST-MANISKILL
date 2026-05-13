@@ -517,7 +517,7 @@ class LearnedVisualRewardWrapper(RewardWrapper):
         return obs, learned_reward, terminated, truncated, info
 
 
-class GoalDistanceLearnedVisualRewardWrapper(LearnedVisualRewardWrapper):
+class GoalDistanceRewardWrapper(LearnedVisualRewardWrapper):
   """Replace the environment reward with distances in embedding space."""
 
   def __init__(
@@ -530,7 +530,7 @@ class GoalDistanceLearnedVisualRewardWrapper(LearnedVisualRewardWrapper):
 
     self.goal_emb = np.atleast_2d(goal_emb)
     self.dist_scale = dist_scale
-    print(f"Initialized GoalDistanceLearnedVisualRewardWrapper with goal_emb shape {self.goal_emb.shape} and distance_scale {dist_scale}")
+    print(f"Initialized GoalDistanceRewardWrapper with goal_emb shape {self.goal_emb.shape} and distance_scale {dist_scale}")
 
   def _get_reward_from_image(self, image):
     """Forward the pixels through the model and compute the reward."""
@@ -541,7 +541,68 @@ class GoalDistanceLearnedVisualRewardWrapper(LearnedVisualRewardWrapper):
     return rew
 
 
-class SubgoalDistanceLearnedVisualRewardWrapper(LearnedVisualRewardWrapper):
+class GoalDistanceWithSubgoalsRewardWrapper(LearnedVisualRewardWrapper):
+    """Replace the environment reward with distances from goal in the embedding space, with subgoals bonuses."""
+    
+    def __init__(
+        self,
+        goal_emb,
+        subgoal_embs,
+        dist_scale,
+        subgoal_info,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+
+        self.goal_emb = np.atleast_2d(goal_emb)
+        self.subgoal_embs = [np.atleast_2d(sg) for sg in subgoal_embs]
+        self.dist_scale = dist_scale
+        self.max_subgoal = len(subgoal_embs)
+        self.c_value = subgoal_info["c_value"]
+        self.distance_thresholds = subgoal_info["distance_thresholds"]
+        self.patience_threshold = subgoal_info["patience_threshold"]
+        
+        self.curr_detected_subgoal = 0
+        
+        print(f"Initialized GoalDistanceWithSubgoalsRewardWrapper with goal_emb shape {self.goal_emb.shape}, "
+              f"{len(self.subgoal_embs)} subgoal embeddings, distance_scale {dist_scale}, and subgoal_info {subgoal_info}")
+        
+    def _update_detected_subgoal(self, emb):
+        """Update the currently detected subgoal based on the current embedding."""
+        if self.curr_detected_subgoal < self.max_subgoal:
+            target_emb = self.subgoal_embs[self.curr_detected_subgoal]
+            dist = np.linalg.norm(target_emb - emb)
+            if dist < self.distance_thresholds[self.curr_detected_subgoal]:
+                self.curr_detected_subgoal += 1
+        
+    def _get_reward_from_image(self, image):
+        """Compute reward based on distance to final goal, with bonus for which subgoal is currently detected."""
+        image_tensor = self._to_tensor(image)
+        emb = self.model.infer(image_tensor).numpy().embs
+        self._update_detected_subgoal(emb)
+        dist = np.linalg.norm(self.goal_emb - emb)
+        rew = - dist * self.dist_scale + self.c_value * self.curr_detected_subgoal
+        return rew
+    
+    def reset(self, *args, **kwargs):
+        self.curr_detected_subgoal = 0
+        self.detected_subgoal_idxs = []
+        return super().reset(*args, **kwargs)
+        
+    def step(self, action):
+        prev_detected_subgoal = self.curr_detected_subgoal
+        
+        obs, reward, terminated, truncated, info = super().step(action)
+        
+        info["detected_subgoal"] = self.curr_detected_subgoal
+        if self.curr_detected_subgoal != prev_detected_subgoal:
+            self.detected_subgoal_idxs.append(self.unwrapped.step_count)
+        info["detected_subgoal_idxs"] = self.detected_subgoal_idxs
+        
+        return obs, reward, terminated, truncated, info
+    
+    
+class SubgoalDistanceRewardWrapper(LearnedVisualRewardWrapper):
     """Replace the environment reward with distances from subgoals in the embedding space."""
     
     def __init__(
@@ -564,7 +625,7 @@ class SubgoalDistanceLearnedVisualRewardWrapper(LearnedVisualRewardWrapper):
         
         self.curr_detected_subgoal = 0
         
-        print(f"Initialized SubgoalDistanceLearnedVisualRewardWrapper with goal_emb shape {self.goal_emb.shape}, "
+        print(f"Initialized SubgoalDistanceRewardWrapper with goal_emb shape {self.goal_emb.shape}, "
               f"{len(self.subgoal_embs)} subgoal embeddings, distance_scale {dist_scale}, and subgoal_info {subgoal_info}")
         
     def _update_detected_subgoal(self, emb):
@@ -579,7 +640,7 @@ class SubgoalDistanceLearnedVisualRewardWrapper(LearnedVisualRewardWrapper):
         if self.curr_detected_subgoal < self.max_subgoal:
             return np.linalg.norm(self.subgoal_embs[self.curr_detected_subgoal] - emb)
         else:
-            return np.linalg.norm(self.subgoal_embs[-1] - emb)
+            return np.linalg.norm(self.goal_emb - emb)
         
     def _get_reward_from_image(self, image):
         """Compute reward based on distance to current subgoal (updating it), with bonus for which subgoal is currently detected."""
@@ -606,7 +667,8 @@ class SubgoalDistanceLearnedVisualRewardWrapper(LearnedVisualRewardWrapper):
         info["detected_subgoal_idxs"] = self.detected_subgoal_idxs
         
         return obs, reward, terminated, truncated, info
-
+    
+    
 
 # TODO: NOT TESTED
 class StateIntrinsicEnvironmentRewardWrapper(RewardWrapper):

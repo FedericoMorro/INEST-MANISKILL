@@ -335,7 +335,7 @@ def wrap_env(env, reward_type, rank, train_flag, exp_dir, learned_reward_data):
   
     
   if reward_type == "goal_dist":
-    return wrappers.GoalDistanceLearnedVisualRewardWrapper(
+    return wrappers.GoalDistanceRewardWrapper(
       env=env, rank=rank, train_flag=train_flag, exp_dir=exp_dir,
       model=model, device=device, #res_hw=model_config.data_augmentation.image_size,  -> should be already 128x128
       camera_names=camera_names,
@@ -346,12 +346,19 @@ def wrap_env(env, reward_type, rank, train_flag, exp_dir, learned_reward_data):
   subgoal_embs = learned_reward_data["subgoal_embs"]
   subgoal_info = learned_reward_data["subgoal_info"]
     
-  if reward_type == "subgoal_dist":
-    return wrappers.SubgoalDistanceLearnedVisualRewardWrapper(
+  if reward_type == "goal_dist_subgoals":
+    return wrappers.GoalDistanceWithSubgoalsRewardWrapper(
       env=env, rank=rank, train_flag=train_flag, exp_dir=exp_dir,
       model=model, device=device, #res_hw=model_config.data_augmentation.image_size,  -> should be already 128x128
       camera_names=camera_names,
       goal_emb=goal_emb, subgoal_embs=subgoal_embs, dist_scale=dist_scale, subgoal_info=subgoal_info,
+    )
+  elif reward_type == "subgoal_dist":
+    return wrappers.SubgoalDistanceRewardWrapper(
+      env=env, rank=rank, train_flag=train_flag, exp_dir=exp_dir,
+      model=model, device=device, #res_hw=model_config.data_augmentation.image_size,  -> should be already 128x128
+      camera_names=camera_names,
+      subgoal_embs=subgoal_embs, dist_scale=dist_scale, subgoal_info=subgoal_info,
     )
   else:
      raise NotImplementedError(f"Reward wrapper type {reward_type} not implemented yet.")
