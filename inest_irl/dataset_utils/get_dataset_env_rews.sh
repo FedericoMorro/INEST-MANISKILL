@@ -21,8 +21,8 @@ echo "+=====================================================+"
 echo "| Replaying trajectory to extract environment rewards |"
 echo "+=====================================================+"
 
-python /home/fmorro/INEST-MANISKILL/inest_irl/maniskill3/replay_trajectory.py \
-    --traj-path /home/fmorro/.maniskill/demos/StackPyramid-v1/motionplanning/trajectory.h5 \
+python inest_irl/maniskill3/replay_trajectory.py \
+    --traj-path $HOME/.maniskill/demos/StackPyramid-v1/motionplanning/trajectory.h5 \
     --save-traj \
     --obs-mode state_dict \
     --output-path $OUT_DIR \
@@ -35,6 +35,6 @@ echo "+========================================================+"
 echo "| Analyzing trajectory to plot rewards and compute stats |"
 echo "+========================================================+"
 
-python /home/fmorro/INEST-MANISKILL/inest_irl/dataset_utils/h5_analyzer.py \
+python inest_irl/dataset_utils/h5_analyzer.py \
 	$OUT_DIR/trajectory.state_dict.pd_joint_pos.physx_cpu.h5 \
 	--rewards $PLOT_FLAG

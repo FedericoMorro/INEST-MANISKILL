@@ -98,7 +98,7 @@ class StackPyramidEnv(BaseEnv):
         env_randomization=DEFAULT_ENV_RANDOMIZATION,
         render_camera=DEFAULT_RENDER_CAMERA,
         enforce_full_episodes=True,
-        is_state_based_policy=True,
+        is_state_based_policy=False,
         **kwargs
     ):
         print("Initializing custom StackPyramid environment")

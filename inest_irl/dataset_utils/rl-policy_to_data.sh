@@ -1,5 +1,7 @@
 #!/bin/bash
 
+DATA_BASE_DIR="../data"
+
 if [ "$#" -lt 1 ]; then
     echo "Usage: $0 <model_path> [--count N] [--lr_model_path lr_model_path] [--lr_data_dir lr_data_dir] [--overwrite] [--eval_learned_return_model <dir>[,<data_dir>]]"
     exit 1
@@ -126,7 +128,7 @@ print_with_border "DATASET CREATION"
 
 save_folder_name="${exp_name}.${exp_seed}.${model_step_no_ext}"
 input_traj_h5="${eval_path}/trajectories.h5"
-output_path="../data/inest-maniskill/experiment_data-trajs/${save_folder_name}"
+output_path="${DATA_BASE_DIR}/inest-maniskill/experiment_data-trajs/${save_folder_name}"
 output_dataset_dir="${output_path}/dataset"
 
 python inest_irl/dataset_utils/h5_to_dataset.py \

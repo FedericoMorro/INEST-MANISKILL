@@ -1,0 +1,105 @@
+#!/bin/bash
+
+DATA_BASE_DIR="../data"
+
+if [ "$#" -lt 2 ]; then
+    echo "Usage: $0 <env_randomization> <suffix> [--count N] [--demos-h5 H5_PATH] [--create-dataset] [--create-videos]"
+    exit 1
+fi
+
+# parse arguments
+env_randomization="$1"
+suffix="$2"
+count=100
+demos_h5=""
+create_dataset=false
+create_videos=false
+
+# parse optional flags
+shift 2
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --count)
+            if [ -z "$2" ]; then
+                echo "Error: --count flag requires a numeric argument"
+                exit 1
+            fi
+            count="$2"
+            shift 2
+            ;;
+        --demos-h5)
+            if [ -z "$2" ]; then
+                echo "Error: --demos-h5 flag requires a path argument"
+                exit 1
+            fi
+            demos_h5="$2"
+            shift 2
+            ;;
+        --create-dataset)
+            create_dataset=true
+            shift
+            ;;
+        --create-videos)
+            create_videos=true
+            shift
+            ;;
+        *)
+            echo "Unknown flag: $1"
+            echo "Usage: $0 <model_path> [--lr_model_path <lr_model_path>] [--lr_data_dir <lr_data_dir>] [--overwrite] [--eval_learned_return_model <dir>[,<data_dir>]]"
+            exit 1
+            ;;
+    esac
+done
+
+
+# generate motion planning trajectories if not provided
+if [[ -z "$demos_h5" ]]; then
+    python inest_irl/maniskill3/panda_motionplanner.py \
+        --num-traj $count \
+        --only-count-success \
+        --traj-name trajectory \
+        --record-dir ../.maniskill/demos_${suffix} \
+        --num-procs 1 \
+        --env-randomization $env_randomization
+
+    demos_h5="../.maniskill/demos_${suffix}/StackPyramid-v1custom/motionplanning/trajectory.h5"
+fi
+
+
+# replay trajectories to generate RGB observations and save new h5 file
+replay_output_dir="${DATA_BASE_DIR}/maniskill/StackPyramid-v1_data-${suffix}"
+
+python inest_irl/maniskill3/replay_trajectory.py \
+    --traj-path $demos_h5 \
+    --save-traj \
+    --obs-mode rgb+state_dict \
+    --output_path $replay_output_dir \
+    --use-env-states \
+    --count $count \
+    --num-envs 10 \
+    --render-camera base_camera \
+    --cam-width 128 \
+    --cam-height 128
+
+replay_traj_h5="${replay_output_dir}/trajectory.rgb+state_dict.pd_joint_pos.physx_cpu.h5"
+
+
+# create dataset from replayed trajectories
+if [[ "$create_dataset" == true ]]; then
+    dataset_output_dir="${DATA_BASE_DIR}/inest-maniskill/datasets/dataset-${suffix}"
+
+    python inest_irl/dataset_utils/h5_to_dataset.py \
+        --h5_path ${replay_traj_h5} \
+        --dataset_path ${dataset_output_dir} \
+        --config inest_irl/dataset_utils/configs_h5_to_dataset/maniskill_demos_merged.yaml
+fi
+
+
+# create videos from replayed trajectories
+if [[ "$create_videos" == true ]]; then
+    python inest_irl/dataset_utils/h5_analyzer.py \
+	    ${replay_traj_h5} \
+	    --vis base_camera \
+	    --output_path ${DATA_BASE_DIR}/inest-maniskill/videos/video-${suffix} \
+	    --subgoals ${dataset_output_dir}/subgoal_frames.json
+fi

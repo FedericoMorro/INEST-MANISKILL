@@ -17,7 +17,7 @@ python inest_irl/dataset_utils/h5_analyzer.py
 
 python inest_irl/dataset_utils/h5_analyzer.py
 	../data/maniskill/StackPyramid-v1_.../trajectory...h5
-	--vis
+	--vis base_camera
 	--output_path ../data/inest-maniskill/videos/video-...
 	[--subgoals ../data/inest-maniskill/datasets/dataset.../subgoal_frames.json]
 
@@ -435,6 +435,9 @@ if __name__ == "__main__":
         # save videos if requested
         if args.vis is not None:
             _save_demo_videos(f, camera_name=args.vis, demo_names=demo_names, out_dir=args.output_path, subgoals_path=subgoals_path)
+            
+        if not (args.sample_traj or args.stats or args.rewards):
+            exit(0)
 
         # create output path for plots and stats
         dir_name = os.path.dirname(args.filepath).split("/")[-1]

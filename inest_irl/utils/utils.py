@@ -267,6 +267,7 @@ def make_env(
     env_randomization=env_randomization,
     render_camera=render_camera,
     enforce_full_episodes=True,
+    is_state_based_policy=True if "rgb" in obs_mode else False,
   )
 
   if add_episode_monitor:

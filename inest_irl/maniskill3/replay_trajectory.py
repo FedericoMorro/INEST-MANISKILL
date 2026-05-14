@@ -2,10 +2,9 @@
 Modified from https://github.com/haosulab/ManiSkill/blob/8c8d33916e07984057cf3d30e5cb9d5c26377b03/mani_skill/trajectory/replay_trajectory.py
 
 The modification allows to save division of episode in subtasks based on heuristic rules.
-This is only supported for the StackPyramid environment using the CPU simulation backend, as it is the one enabling the
-    possibility to save the video frames to then build the dataset, and WITHOUT action conversion.
+This is only supported for the StackPyramid environment using directly the store env states, as it is the one enabling
+    the possibility to save the video frames to then build the dataset, and WITHOUT action conversion.
 """
-
 
 """
 Example usage:
