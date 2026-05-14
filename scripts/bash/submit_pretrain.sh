@@ -3,7 +3,7 @@
 echo "====================================="
 echo "TRAINING HYPERPARAMETERS"
 echo " Experiment Name: $EXPERIMENT_NAME"
-echo " Dataset Path: $SCRATCH_FLASH_DATASET_PATH"
+echo " Dataset Path: $TRAIN_DATASET_PATH"
 echo " Random Seed: $RND_SEED"
 echo " Batch Size: $BATCH_SIZE"
 echo " Train Max Iters: $TRAIN_MAX_ITERS"
@@ -93,7 +93,7 @@ CMD="python /home/fmorro/INEST-MANISKILL/scripts/pretrain.py \
     --experiment_name ${EXPERIMENT_NAME} \
     --seed ${RND_SEED} \
     --wandb \
-    --config.data.root=${SCRATCH_FLASH_DATASET_PATH} \
+    --config.data.root=${TRAIN_DATASET_PATH} \
     --config.data.batch_size=${BATCH_SIZE} \
     --config.optim.train_max_iters=${TRAIN_MAX_ITERS} \
     --config.frame_sampler.num_frames_per_sequence=${NUM_FRAMES_PER_SEQUENCE}"

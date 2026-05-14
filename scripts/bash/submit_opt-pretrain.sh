@@ -3,7 +3,7 @@
 echo "====================================="
 echo "TRAINING HYPERPARAMETERS"
 echo " Experiment Name: $EXPERIMENT_NAME"
-echo " Dataset Path: $SCRATCH_FLASH_DATASET_PATH"
+echo " Dataset Path: $TRAIN_DATASET_PATH"
 echo " Random Seed: $RND_SEED"
 echo "====================================="
 
@@ -90,7 +90,7 @@ CMD="python /home/fmorro/INEST-MANISKILL/scripts/opt_pretrain.py \
     --experiment_name ${EXPERIMENT_NAME} \
     --seed ${RND_SEED} \
     --wandb \
-    --data_path=${SCRATCH_FLASH_DATASET_PATH}"
+    --data_path=${TRAIN_DATASET_PATH}"
 
 # Execute the command
 echo "Executing: $CMD"

@@ -3,6 +3,8 @@
 export SLURM_EXCLUDE_NODES=compute-3-11
 
 QUEUE_TIME=$(date +%Y.%m.%d-%H.%M.%S)
+TRAIN_DATA_PARTITION=$SCRATCH
+TRAIN_NODE_PARTITION=gpu_a40
 
 mkdir -p ${HOME}/logs
 
@@ -34,13 +36,13 @@ manage_existing_exp_folder() {
 }
 
 manage_scratch_flash_folder() {
-    SCRATCH_FLASH_DATASET_PATH="$1"
+    TRAIN_DATASET_PATH="$1"
     DATASET_PATH="$2"
     EXPERIMENT_NAME="$3"
 
-    SCRATCH_FLASH_DATASET_PATH="${SCRATCH_FLASH}/$(basename ${DATASET_PATH})"
-    if [ -d $SCRATCH_FLASH_DATASET_PATH ]; then
-        echo "Directory ${SCRATCH_FLASH_DATASET_PATH} already exists on SCRATCH_FLASH."
+    TRAIN_DATASET_PATH="${TRAIN_DATA_PARTITION}/$(basename ${DATASET_PATH})"
+    if [ -d $TRAIN_DATASET_PATH ]; then
+        echo "Directory ${TRAIN_DATASET_PATH} already exists on TRAIN_DATA_PARTITION."
         read -p "Do you want to perform copy anyway (y/N)? [y/N]: " choice
         case "$choice" in
             y|Y ) echo "Performing copy...";;
@@ -48,24 +50,24 @@ manage_scratch_flash_folder() {
         esac
     fi
 
-    echo "Copying dataset to SCRATCH_FLASH for faster access during training..."
-    TO_BE_COPIED=$(rsync -avh --dry-run ${DATASET_PATH} ${SCRATCH_FLASH}/ | grep -v "/$" | wc -l)
+    echo "Copying dataset to $TRAIN_DATA_PARTITION for faster access during training..."
+    TO_BE_COPIED=$(rsync -avh --dry-run ${DATASET_PATH} ${TRAIN_DATA_PARTITION}/ | grep -v "/$" | wc -l)
     #echo "To track the copy progress, run the following command in another terminal:"
     #echo "cat ${HOME}/logs/rsync_${EXPERIMENT_NAME}_pretrain_${QUEUE_TIME}.log | grep -v '/$' | wc -l | awk -v total=$TO_BE_COPIED '{printf(\"%.2f%%\\n\", (\$1/total)*100)}'"
     #echo "This may take a while..."
-    #rsync -avzh ${DATASET_PATH} ${SCRATCH_FLASH} > ${HOME}/logs/rsync_${EXPERIMENT_NAME}_pretrain_${QUEUE_TIME}.log 2>&1
+    #rsync -avzh ${DATASET_PATH} ${TRAIN_DATA_PARTITION}/ > ${HOME}/logs/rsync_${EXPERIMENT_NAME}_pretrain_${QUEUE_TIME}.log 2>&1
 
     CHECKPOINT_NUM_FILES=$(TO_BE_COPIED / 10)   # check every 10%
 
     echo "Compressing input dataset for faster copying..."
     tar -czf --checkpoint=${CHECKPOINT_NUM_FILES} ${DATASET_PATH}.tar.gz -C $(dirname ${DATASET_PATH}) $(basename ${DATASET_PATH})
-    echo "Copying compressed dataset to SCRATCH_FLASH..."
-    rsync -avzh --progress ${DATASET_PATH}.tar.gz ${SCRATCH_FLASH_DATASET_PATH}.tar.gz
-    echo "Extracting dataset on SCRATCH_FLASH..."
-    tar -xzf --checkpoint=${CHECKPOINT_NUM_FILES} ${SCRATCH_FLASH_DATASET_PATH}.tar.gz -C $(dirname ${SCRATCH_FLASH_DATASET_PATH})
+    echo "Copying compressed dataset to TRAIN_DATA_PARTITION..."
+    rsync -avzh --progress ${DATASET_PATH}.tar.gz ${TRAIN_DATASET_PATH}.tar.gz
+    echo "Extracting dataset on TRAIN_DATA_PARTITION..."
+    tar -xzf --checkpoint=${CHECKPOINT_NUM_FILES} ${TRAIN_DATASET_PATH}.tar.gz -C $(dirname ${TRAIN_DATASET_PATH})
     echo "If you want to clean up the compressed files, run the following commands:"
     echo "rm ${DATASET_PATH}.tar.gz"
-    echo "rm ${SCRATCH_FLASH_DATASET_PATH}.tar.gz"
+    echo "rm ${TRAIN_DATASET_PATH}.tar.gz"
 }
 
 
@@ -94,7 +96,7 @@ if [[ "$1" == "rl" ]]; then
         --mem=64GB \
         --mail-type=ALL \
         --mail-user=federico.morro@polito.it \
-        --partition=gpu_a40 \
+        --partition=${TRAIN_NODE_PARTITION} \
         --gres=gpu:1 \
         --output=${HOME}/logs/%j_${EXPERIMENT_NAME}_inest.out \
         --error=${HOME}/logs/%j_${EXPERIMENT_NAME}_inest.err \
@@ -105,17 +107,17 @@ if [[ "$1" == "rl" ]]; then
 elif [[ "$1" == "pretrain" || "$1" == "opt-pretrain" ]]; then
     echo "Submitting INEST MANISKILL pretraining job..."
 
-    DATASET_PATH="/home/fmorro/data/inest-maniskill/dataset-bc+hc"
+    DATASET_PATH="/home/fmorro/data/inest-maniskill/dataset-min-rand"
 
     # copy dataset to SCRATCH_FLASH for faster access during training (if already present ask user)
-    export SCRATCH_FLASH_DATASET_PATH="${SCRATCH_FLASH}/$(basename ${DATASET_PATH})"
-    manage_scratch_flash_folder "${SCRATCH_FLASH_DATASET_PATH}" "${DATASET_PATH}" "${EXPERIMENT_NAME}"
-    echo "Dataset path: ${SCRATCH_FLASH_DATASET_PATH}"
+    export TRAIN_DATASET_PATH="${TRAIN_DATA_PARTITION}/$(basename ${DATASET_PATH})"
+    manage_scratch_flash_folder "${TRAIN_DATASET_PATH}" "${DATASET_PATH}" "${EXPERIMENT_NAME}"
+    echo "Dataset path: ${TRAIN_DATASET_PATH}"
 
 
     if [[ "$1" == "pretrain" ]]; then
 
-        export BATCH_SIZE="16"
+        export BATCH_SIZE="8"
         export TRAIN_MAX_ITERS="10_000"
         export NUM_FRAMES_PER_SEQUENCE="40"
 
@@ -127,7 +129,7 @@ elif [[ "$1" == "pretrain" || "$1" == "opt-pretrain" ]]; then
             --mem=32GB \
             --mail-type=ALL \
             --mail-user=federico.morro@polito.it \
-            --partition=gpu_a40 \
+            --partition=${TRAIN_NODE_PARTITION} \
             --gres=gpu:1 \
             --output=${HOME}/logs/%j_${EXPERIMENT_NAME}_pretrain.out \
             --error=${HOME}/logs/%j_${EXPERIMENT_NAME}_pretrain.err \
@@ -146,7 +148,7 @@ elif [[ "$1" == "pretrain" || "$1" == "opt-pretrain" ]]; then
             --mem=48GB \
             --mail-type=ALL \
             --mail-user=federico.morro@polito.it \
-            --partition=gpu_a40_ext \
+            --partition=${TRAIN_NODE_PARTITION} \
             --gres=gpu:1 \
             --output=${HOME}/logs/%j_${EXPERIMENT_NAME}_opt-pretrain.out \
             --error=${HOME}/logs/%j_${EXPERIMENT_NAME}_opt-pretrain.err \

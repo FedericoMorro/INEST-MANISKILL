@@ -1,9 +1,13 @@
 # Experiments Naming
 
 ## Common
-- `bc` / `rc`
+- `bc` / `rc` / `hc` / `mc`
   - `bc`: base camera
   - `rc`: render camera
+  - `hc`: hand camera
+  - `mc`: multi-camera (usually base + hand)
+- `min`
+  - `minimal randomization` applied to the environment
 
 ## Pretraining
 - `s1k`
