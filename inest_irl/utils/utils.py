@@ -430,11 +430,11 @@ def load_learned_reward_data(pretrained_path, device, data_dir=None):
   
   cache_path = os.path.join(pretrained_path, "checkpoints", f"cached_embeddings_step_{model_step}.pkl")
   if os.path.exists(cache_path):
-    print(f"Loading precomputed goal embedding from {cache_path}")
+    print(f"Loading precomputed (sub)goal embedding(s) from {cache_path}")
     with open(cache_path, "rb") as fp:
       goal_emb, subgoal_embs, dist_scale, subgoal_info = pickle.load(fp)
   else:
-    print("No precomputed goal embedding found, computing now...")
+    print("No cached (sub)goal embedding(s) found, computing now...")
     from inest_irl.utils.compute_learned_return import compute_goal_embedding
     
     if data_dir is not None:
@@ -442,18 +442,18 @@ def load_learned_reward_data(pretrained_path, device, data_dir=None):
       model_config.data_dir = data_dir
     
     train_loader = common.get_downstream_dataloaders(model_config)["train"]
-    subgoal_frames_path = os.path.join(pretrained_path, "subgoal_frames.json")
+    subgoal_frames_path = os.path.join(model_config.data.root, "subgoal_frames.json")
     if os.path.exists(subgoal_frames_path):
       with open(subgoal_frames_path, 'r') as f:
         subgoal_frames = json.load(f)
-      print(f"Found subgoal frames file with {len(subgoal_frames)} trajectories - will compute and plot subgoal rewards")
+      print(f"Found subgoal frames file with {len(subgoal_frames)} trajectories - will compute goal and subgoals embeddings")
     else:
       subgoal_frames = None
-      print("No subgoal frames file found - will only compute and plot rewards to final goal")
+      print("No subgoal frames file found - will only compute goal embedding")
     goal_emb, subgoal_embs, dist_scale, subgoal_info = compute_goal_embedding(model, train_loader, subgoal_frames=subgoal_frames, device=device)
     with open(cache_path, "wb") as fp:
       pickle.dump((goal_emb, subgoal_embs, dist_scale, subgoal_info), fp)
-    print(f"Computed and cached goal embedding at {cache_path}")
+    print(f"Computed and cached (sub)goal embedding(s) at {cache_path}")
     
   return {
     #"model": model,  # do not pass model, load in reward wrapper to avoid GPU memory issues and for efficiency

@@ -76,7 +76,7 @@ if [[ "$1" == "rl" ]]; then
 
     export REWARD_WRAPPER_TYPE="subgoal_dist"
     export REWARD_SCALING="1.0"
-    export ENV_RANDOMIZATION="same-seed"
+    export ENV_RANDOMIZATION="minimal"
     export REPLAY_BUFFER_CAPACITY="1_000_000"
     export ACTOR_LR="3e-4"
     export CRITIC_LR="1e-4"
@@ -85,7 +85,7 @@ if [[ "$1" == "rl" ]]; then
     export TARGET_ENTROPY="-3.5"
     export STD_ACTION_NOISE="0.0"
     export ANNEAL_TARGET_ENTROPY="False"
-    export REWARD_WRAPPER_PRETRAINED_PATH="/home/fmorro/INEST-MANISKILL/experiments/pretrain/bc+hc_b16_fr40_fus/"
+    export REWARD_WRAPPER_PRETRAINED_PATH="/home/fmorro/INEST-MANISKILL/experiments/pretrain/min_mc_b8_fr40/"
 
     manage_existing_exp_folder "${HOME}/INEST-MANISKILL/experiments/sb3/${EXPERIMENT_NAME}/${RND_SEED}"
     manage_existing_exp_folder "${HOME}/INEST-MANISKILL/experiments/lr-sb3/${EXPERIMENT_NAME}/${RND_SEED}"
@@ -119,7 +119,7 @@ elif [[ "$1" == "pretrain" || "$1" == "opt-pretrain" ]]; then
 
         export BATCH_SIZE="8"
         export TRAIN_MAX_ITERS="10_000"
-        export NUM_FRAMES_PER_SEQUENCE="40"
+        export NUM_FRAMES_PER_SEQUENCE="80"
 
         manage_existing_exp_folder "${HOME}/INEST-MANISKILL/experiments/pretrain/${EXPERIMENT_NAME}"
 
