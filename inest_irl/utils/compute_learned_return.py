@@ -178,6 +178,7 @@ def compute_goal_embedding(model, train_loader, subgoal_frames, device):
       subgoal_embs.append(np.mean(np.stack(traj_subgoal_embs, axis=0), axis=0, keepdims=True))
   else:
     subgoal_embs = None
+    print("WARNING: No subgoal embeddings computed")
   
   # add subgoal info for pickling, used by wrapper in rl training
   subgoal_info = {

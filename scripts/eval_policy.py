@@ -1,3 +1,13 @@
+"""
+Example usage:
+
+python scripts/eval_policy.py \
+    ../data/inest-maniskill/_experiments/lr-sb3/min_fr40_d0.95/22/checkpoints/best_model.zip \
+    --num_episodes 10 --save_rgb --learned_reward_model_path \
+    ../data/inest-maniskill/_experiments/pretrain/min_mc_b8_fr40/ \
+    --learned_reward_data_dir ../data/inest-maniskill/datasets/dataset-min-rand/
+"""
+
 import argparse
 import h5py
 import imageio
@@ -97,6 +107,32 @@ class EvalResults:
             self.episodes_data.extend(other.episodes_data)
 
 
+def _extract_rgb_from_info(info):
+    """Extract RGB frame(s) from info dict. Handles both single and multi-camera cases.
+    
+    Args:
+        info: info dict that may contain camera data
+        camera_names: optional list of camera names to extract in order
+        
+    Returns:
+        Dict mapping camera name to frame (H,W,3), or empty dict if no frames found
+    """
+    if not isinstance(info, dict):
+        return {}
+    
+    frames_dict = {}
+    
+    # Try to extract sensor_data from info (ManiSkill format)
+    sensor_data = info.get("sensor_data", {})
+    if isinstance(sensor_data, dict):
+        # extract all RGB data available
+        for cam_name, cam_data in sensor_data.items():
+            if isinstance(cam_data, dict) and "rgb" in cam_data:
+                frames_dict[cam_name] = cam_data["rgb"][0,...]  # remove batch dimension
+    
+    return frames_dict
+
+
 def _save_video(video_path, frames, fps=10):
     """Save frames to video file using imageio."""
     if not frames:
@@ -175,8 +211,12 @@ def _save_trajectory_h5(h5_path, json_path, env_config, episodes_data, save_rgb=
         env_config.env_name,
         seed=env_config.seed,
         reward_type=env_config.reward_wrapper.type,
+        obs_mode=env_config.obs_mode,
         action_repeat=env_config.action_repeat,
         frame_stack=env_config.frame_stack,
+        env_randomization=env_config.env_randomization,
+        render_camera=env_config.render_camera,
+        reward_scaling=env_config.reward_scaling,
         learned_reward_data=env_config.learned_reward_data,
     )
     
@@ -241,7 +281,11 @@ def _save_trajectory_h5(h5_path, json_path, env_config, episodes_data, save_rgb=
         traceback.print_exc()
 
 def _run_episode(model, env, eval_results, episode_num, video_path=None, save_video=True, save_rgb=False):
-    """Run single evaluation episode, optionally collecting RGB observations, actions, rewards, and subgoal indices."""
+    """Run single evaluation episode, optionally collecting RGB observations, actions, rewards, and subgoal indices.
+    
+    Args:
+        camera_names: optional list of camera names to extract in order for multi-camera setups
+    """
     reset_result = env.reset()
     if isinstance(reset_result, tuple):
         obs, info = reset_result
@@ -251,7 +295,7 @@ def _run_episode(model, env, eval_results, episode_num, video_path=None, save_vi
     done = False
     step_count = 0
     ep_cum_reward = 0.0
-    frames = []
+    frames = {}  # dict mapping camera_name -> list of frames
     actions = []
     observations = []
     rewards = []
@@ -294,27 +338,34 @@ def _run_episode(model, env, eval_results, episode_num, video_path=None, save_vi
         if detected_subgoal is not None and detected_subgoal > len(detected_subgoal_idxs):
             detected_subgoal_idxs.append(step_count)
         
-        # Render frame for both video and optional observation storage
+        # Extract RGB frames from info for both video and optional observation storage
         if save_video or save_rgb:
-            try:
-                frame = utils.safe_render(env, mode="rgb_array")
-                if frame is not None:
+            rgb_frames_dict = _extract_rgb_from_info(info)
+            if rgb_frames_dict:
+                # Initialize frame lists for each camera on first frame
+                for cam_name, frame in rgb_frames_dict.items():
+                    if cam_name not in frames:
+                        frames[cam_name] = []
                     if save_video:
-                        frames.append(frame)
-                    if save_rgb:
+                        frames[cam_name].append(frame)
+                    # For RGB storage, use first camera only
+                    if save_rgb and cam_name == list(rgb_frames_dict.keys())[0]:
                         observations.append(frame)
-            except Exception as e:
-                logging.debug(f"Error getting frame: {e}")
     
-    # Save video if frames were collected
+    # Save video for each camera if frames were collected
     if video_path and frames:
-        _save_video(video_path, frames)
+        for cam_name, cam_frames in frames.items():
+            if cam_frames:
+                # Insert camera name in video path (e.g., "episode_0.mp4" -> "episode_0_base_camera.mp4")
+                path_parts = os.path.splitext(video_path)
+                cam_video_path = f"{path_parts[0]}_{cam_name}{path_parts[1]}"
+                _save_video(cam_video_path, cam_frames)
         
     # add episode results to eval_results
     eval_results.add_episode(
         rewards=rewards,
         length=step_count,
-        frame_count=len(frames),
+        frame_count=sum(len(cam_frames) for cam_frames in frames.values()),
         subgoal_idxs=subgoal_idxs,
         env_rewards=env_rewards,
         detected_subgoal_idxs=detected_subgoal_idxs,
@@ -348,8 +399,12 @@ def _single_process_evaluation(pipe, checkpoint_dir, eval_env_config, args, ep_n
         eval_env_config.env_name,
         seed=eval_env_config.seed,
         reward_type=eval_env_config.reward_wrapper.type,
+        obs_mode=eval_env_config.obs_mode,
         action_repeat=eval_env_config.action_repeat,
         frame_stack=eval_env_config.frame_stack,
+        env_randomization=eval_env_config.env_randomization,
+        render_camera=eval_env_config.render_camera,
+        reward_scaling=eval_env_config.reward_scaling,
         learned_reward_data=eval_env_config.learned_reward_data,
     )
     
@@ -367,7 +422,8 @@ def _single_process_evaluation(pipe, checkpoint_dir, eval_env_config, args, ep_n
         eval_env.unwrapped.set_seed(args.seed + episode_num)    #! crucial to have (start, end) to have different seeds for different processes
          
         ep_data = _run_episode(
-            model, eval_env, eval_results, episode_num, video_path, save_video=args.save_viz, save_rgb=args.save_rgb
+            model, eval_env, eval_results, episode_num, video_path, 
+            save_video=args.save_viz, save_rgb=args.save_rgb,
         )
         
         # save reward curve plot
@@ -380,7 +436,7 @@ def _single_process_evaluation(pipe, checkpoint_dir, eval_env_config, args, ep_n
         add_info += f", detected_subgoal={len(ep_data['detected_subgoal_idxs'])}" if ep_data['detected_subgoal_idxs'] is not None else ""
         logging.info(f"Episode {episode_num}: reward={np.sum(ep_data['rewards']):.2f}, length={ep_data['length']}, frames={ep_data['frame_count']}{add_info}")
         
-    print(eval_results.to_dict())
+    #print(eval_results.to_dict())
         
     eval_env.close()
     pipe.send(eval_results)
@@ -517,6 +573,10 @@ def main():
         action_repeat=config.action_repeat,
         frame_stack=config.frame_stack,
         learned_reward_data=learned_reward_data,
+        obs_mode="state+rgb",  # Force RGB observation mode for video frame extraction
+        env_randomization=config.env_randomization,
+        render_camera=config.render_camera,
+        reward_scaling=config.reward_scaling,
     )
 
     # Create output directories: parent/out_eval-policy-py/{model_basename}/
