@@ -52,12 +52,13 @@ class EvalEpisodeData:
     def __init__(self):
         self.episodes_data = {}
     
-    def add_episode(self, traj_id, seed, length, actions, observations, rewards, subgoal_idxs):
+    def add_episode(self, traj_id, seed, length, actions, states, observations, rewards, subgoal_idxs):
         """Add episode data for a trajectory."""
         self.episodes_data[traj_id] = {
             'seed': seed,
             'elapsed_steps': length,
             'actions': actions,
+            'states': states,
             'observations': observations,
             'rewards': rewards,
             'subgoal_idxs': subgoal_idxs,
@@ -84,7 +85,11 @@ class EvalTrajectoryLearnedReward(TrajectoryLearnedReward):
                  subgoal_dists=None, subgoal_reachs=None, subgoal_reachs_gt=None):
         super().__init__(rewards, subgoal_rewards, subgoal_dists, 
                         subgoal_reachs, subgoal_reachs_gt)
+        
         self.env_rewards = env_rewards
+        
+        del self.subgoal_rewards
+        del self.subgoal_dists
 
 
 class EvalDatasetLearnedReward(DatasetLearnedReward):
@@ -250,24 +255,26 @@ def _save_trajectory_h5(h5_path, json_path, env_config, episodes_data, save_rgb=
         # Save trajectories to H5
         with h5py.File(h5_path, 'w') as f:
             for episode_id, data in enumerate(episodes_data):
-                actions = data['actions']
-                observations = data['observations']
-                rewards = data['rewards']
-                subgoal_idxs = data.get('subgoal_idxs', [])
                 
-                actions_array = np.array(actions, dtype=np.float32)
+                states_array = np.array(data['states'], dtype=np.float32)
+                f.create_dataset(f'traj_{episode_id}/states', data=states_array, compression='gzip')
+                
+                actions_array = np.array(data['actions'], dtype=np.float32)
                 f.create_dataset(f'traj_{episode_id}/actions', data=actions_array, compression='gzip')
                 
                 if save_rgb:
-                    obs_array = np.array(observations, dtype=np.uint8)
-                    f.create_dataset(f'traj_{episode_id}/obs/sensor_data/base_camera/rgb', data=obs_array, compression='gzip')
+                    for camera_name, frames in data['observations'].items():
+                        obs_array = np.array(frames, dtype=np.uint8)
+                        f.create_dataset(f'traj_{episode_id}/obs/sensor_data/{camera_name}/rgb', data=obs_array, compression='gzip')
                 
-                rewards_array = np.array(rewards, dtype=np.float32)
+                rewards_array = np.array(data['rewards'], dtype=np.float32)
                 f.create_dataset(f'traj_{episode_id}/rewards', data=rewards_array, compression='gzip')
                 
+                
                 # convert subgoal idxs to per-step subgoal data and save as extra obs for dataset creation handling
+                subgoal_idxs = data.get('subgoal_idxs', [])
                 subgoal_data = []
-                for i in range(len(actions)):
+                for i in range(len(data['states'])):
                     subgoal_data.append([len([idx for idx in subgoal_idxs if idx <= i])])
                 subgoal_array = np.array(subgoal_data, dtype=np.int32)
                 f.create_dataset(f'traj_{episode_id}/obs/extra/subgoal', data=subgoal_array, compression='gzip')
@@ -308,8 +315,8 @@ def _run_episode(model, env, episode_num, seed, video_path=None, save_video=True
     done = False
     step_count = 0
     frames = {}  # dict mapping camera_name -> list of frames
+    states = []
     actions = []
-    observations = []
     rewards = []
     subgoal_reachs_gt = [np.nan for _ in range(MAX_SUBGOAL)]  # Initialize to np.nan
     env_rewards = None
@@ -326,6 +333,7 @@ def _run_episode(model, env, episode_num, seed, video_path=None, save_video=True
             obs, reward, terminated, info = step_result
             truncated = False
         
+        states.append(obs)
         reward = float(reward)
         rewards.append(reward)
         step_count += 1
@@ -360,9 +368,6 @@ def _run_episode(model, env, episode_num, seed, video_path=None, save_video=True
                         frames[cam_name] = []
                     if save_video:
                         frames[cam_name].append(frame)
-                    # For RGB storage, use first camera only
-                    if save_rgb and cam_name == list(rgb_frames_dict.keys())[0]:
-                        observations.append(frame)
     
     # Save video for each camera if frames were collected
     if video_path and frames:
@@ -389,8 +394,9 @@ def _run_episode(model, env, episode_num, seed, video_path=None, save_video=True
     episode_data = {
         'seed': seed,
         'length': step_count,
+        'states': states,
         'actions': actions,
-        'observations': observations,
+        'observations': frames,
         'rewards': rewards,
         'subgoal_idxs': subgoal_reachs_gt,
     }

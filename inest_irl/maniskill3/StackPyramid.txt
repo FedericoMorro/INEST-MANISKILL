@@ -33,3 +33,43 @@ e.g. for k=3, the state dimension becomes 68*3=204.
 To be set in ../utils/utils.py:make_env()
 - pd_ee_delta_pos: 4D -> dx, dy, dz, grasp
 - pd_ee_delta_pose: 7D -> dx, dy, dz, grasp, droll, dpitch, dyaw
+
+
+
+**DEMO h5 FILE STRUCTURE**
+
+traj_0:
+Keys: ['obs', 'actions', 'terminated', 'truncated', 'success', 'env_states']
+    obs: Group with keys ['agent', 'extra', 'sensor_param', 'sensor_data']
+    agent: Group with keys ['qpos', 'qvel']
+        qpos: shape=(177, 9), dtype=float32
+        qvel: shape=(177, 9), dtype=float32
+    extra: Group with keys ['tcp_pose']
+        tcp_pose: shape=(177, 7), dtype=float32
+    sensor_param: Group with keys ['base_camera', 'hand_camera']
+        base_camera: Group with keys ['extrinsic_cv', 'cam2world_gl', 'intrinsic_cv']
+        extrinsic_cv: shape=(177, 3, 4), dtype=float32
+        cam2world_gl: shape=(177, 4, 4), dtype=float32
+        intrinsic_cv: shape=(177, 3, 3), dtype=float32
+        hand_camera: Group with keys ['extrinsic_cv', 'cam2world_gl', 'intrinsic_cv']
+        extrinsic_cv: shape=(177, 3, 4), dtype=float32
+        cam2world_gl: shape=(177, 4, 4), dtype=float32
+        intrinsic_cv: shape=(177, 3, 3), dtype=float32
+    sensor_data: Group with keys ['base_camera', 'hand_camera']
+        base_camera: Group with keys ['rgb']
+        rgb: shape=(177, 128, 128, 3), dtype=uint8
+        hand_camera: Group with keys ['rgb']
+        rgb: shape=(177, 128, 128, 3), dtype=uint8
+    actions: shape=(176, 8), dtype=float32
+    terminated: shape=(176,), dtype=bool
+    truncated: shape=(176,), dtype=bool
+    success: shape=(176,), dtype=bool
+    env_states: Group with keys ['actors', 'articulations']
+    actors: Group with keys ['table-workspace', 'cubeA', 'cubeB', 'cubeC']
+        table-workspace: shape=(177, 13), dtype=float32
+        cubeA: shape=(177, 13), dtype=float32
+        cubeB: shape=(177, 13), dtype=float32
+        cubeC: shape=(177, 13), dtype=float32
+    articulations: Group with keys ['panda_wristcam']
+        panda_wristcam: shape=(177, 31), dtype=float32
+traj_1: ...
