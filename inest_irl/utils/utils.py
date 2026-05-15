@@ -466,112 +466,22 @@ def load_learned_reward_data(pretrained_path, device, data_dir=None):
   }
   
   
-def safe_render(env, mode="rgb_array", **kwargs):
-    """Safely call env.render, handling ManiSkill/Gym differences and ensuring
-    a single (H, W, 3) RGB NumPy frame is always returned (even if batched)."""
+def is_nan_or_none(value):
+  return value is None or value == float('nan') or (
+    isinstance(value, (np.float32, np.float64)) and np.isnan(value)
+  )
     
-    frame = None
-    try:
-        # Try Gym-style render first
-        frame = env.render(mode=mode, **kwargs)
-    except TypeError as e:
-        if "positional argument" in str(e) or "unexpected keyword argument" in str(e):
-            # Fallback to ManiSkill-style render()
-            try:
-                frame = env.render()
-            except Exception:
-                raise e
-        else:
-            raise e
-
-    # ---- Normalize ManiSkill / Gym render output ----
-    if frame is None:
-        return None
-
-    # Handle dicts or lists (e.g., ManiSkill multiple cameras)
-    if isinstance(frame, dict):
-        # Pick the first camera image
-        frame = next(iter(frame.values()))
-    elif isinstance(frame, (list, tuple)):
-        frame = frame[0]
-
-    # Convert torch.Tensor → numpy
-    if isinstance(frame, torch.Tensor):
-        frame = frame.detach().cpu().numpy()
-
-    # Handle batched ManiSkill outputs (num_envs, H, W, 3)
-    if isinstance(frame, np.ndarray):
-        if frame.ndim == 4 and frame.shape[-1] == 3:
-            frame = frame[0]
-        elif frame.ndim == 5 and frame.shape[-1] == 3:
-            frame = frame[0, 0]
-
-    # Convert float images to uint8 if needed
-    if isinstance(frame, np.ndarray) and frame.dtype != np.uint8:
-        fmin, fmax = frame.min(), frame.max()
-        if fmin >= 0.0 and fmax <= 1.0:
-            frame = (frame * 255).astype(np.uint8)
-        elif fmin >= -1.0 and fmax <= 1.0:
-            frame = ((frame + 1.0) / 2.0 * 255).astype(np.uint8)
-        else:
-            frame = np.clip(frame, 0, 255).astype(np.uint8)
-
-    # Final sanity check
-    if not isinstance(frame, np.ndarray) or frame.ndim != 3 or frame.shape[-1] != 3:
-        logging.debug(f"Warning: unexpected frame shape {getattr(frame, 'shape', None)}")
-        return None
-
-    return frame
-
-
-def patch_env_render_compatibility(env):
-    """Automatically patch any wrapper in the env chain that has render signature mismatch."""
     
-    def make_compatible_render(original_render):
-        """Create a compatible render method from an incompatible one."""
-        def compatible_render(self, mode="rgb_array", **kwargs):
-            try:
-                # First try to call original with mode
-                sig = inspect.signature(original_render)
-                if "mode" in sig.parameters or len(sig.parameters) > 1:
-                    return original_render(mode=mode, **kwargs)
-                else:
-                    # Original only accepts self, call without args
-                    return original_render()
-            except TypeError:
-                # Fallback to no-args call
-                return original_render()
-        return compatible_render
-    
-    # Walk the wrapper chain and patch incompatible render methods
-    current_env = env
-    patched_count = 0
-    
-    while current_env is not None:
-        render_method = getattr(current_env, 'render', None)
-        if render_method is not None:
-            try:
-                sig = inspect.signature(render_method)
-                params = list(sig.parameters.keys())
-                
-                # Check if this render method only accepts 'self'
-                if len(params) <= 1 and "mode" not in sig.parameters:
-                    # Patch this wrapper's render method
-                    compatible_method = make_compatible_render(render_method)
-                    current_env.render = MethodType(compatible_method, current_env)
-                    logging.info(f"Patched render method on {type(current_env).__name__}")
-                    patched_count += 1
-            except (ValueError, TypeError):
-                # Can't inspect signature, skip
-                pass
-        
-        # Move to next wrapper in chain
-        if hasattr(current_env, 'env'):
-            current_env = current_env.env
-        elif hasattr(current_env, 'unwrapped') and current_env.unwrapped != current_env:
-            current_env = current_env.unwrapped
-        else:
-            break
-    
-    logging.info(f"Patched {patched_count} wrapper(s) for render compatibility")
-    return env
+def to_json_serializable(obj):
+  if isinstance(obj, np.ndarray):
+    return [to_json_serializable(x) for x in obj.tolist()]
+  elif isinstance(obj, dict):
+    return {to_json_serializable(key): to_json_serializable(value) for key, value in obj.items()}
+  elif is_nan_or_none(obj):
+    return None
+  elif isinstance(obj, (np.float32, np.float64)):
+    return float(obj)
+  elif isinstance(obj, (np.int32, np.int64)):
+    return int(obj)
+  else:
+    return obj

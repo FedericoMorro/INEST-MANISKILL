@@ -21,8 +21,7 @@ from stable_baselines3.her.her_replay_buffer import HerReplayBuffer
 
 from inest_irl.utils import utils
 from inest_irl.utils.loggers import CSVLogger
-
-from eval_policy import generate_reward_plot
+from inest_irl.viz.reward_plot import generate_reward_plot
 
 FLAGS = flags.FLAGS
 
