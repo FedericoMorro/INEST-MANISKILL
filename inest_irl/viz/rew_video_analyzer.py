@@ -257,9 +257,9 @@ class TrajectoryLoader:
         """
         if traj_id not in self.trajectories:
             return None
-        
+
         traj_data = self.trajectories[traj_id].copy()
-        
+
         # Add rewards if available
         reward_info = None
 
@@ -303,7 +303,88 @@ class TrajectoryLoader:
             traj_data['env_rewards'] = None
             traj_data['subgoal_idxs'] = []
             traj_data['gt_subgoal_idxs'] = []
-        
+
+        # If env_rewards missing in the JSON, try to load from the HDF5 demo group
+        if traj_data.get('env_rewards') is None:
+            try:
+                with h5py.File(self.hdf5_path, 'r') as hf:
+                    # pick root similarly to _load_h5
+                    if 'data' in hf:
+                        root = hf['data']
+                    elif 'trajectories' in hf:
+                        root = hf['trajectories']
+                    else:
+                        root = hf
+
+                    # candidate h5 keys to try: h5_traj_id, traj_id, provided traj_id arg
+                    h5_key_candidates = []
+                    h5_traj_id = traj_data.get('h5_traj_id')
+                    if h5_traj_id:
+                        h5_key_candidates.append(str(h5_traj_id))
+                    mapped_traj_id = traj_data.get('traj_id')
+                    if mapped_traj_id:
+                        h5_key_candidates.append(str(mapped_traj_id))
+                    h5_key_candidates.append(str(traj_id))
+
+                    found_env_rewards = None
+                    for key in h5_key_candidates:
+                        if key in root:
+                            demo = root[key]
+                            # Check common dataset names first
+                            common_names = ['env_rewards', 'env_reward', 'env_reward_seq', 'env/rewards', 'env/reward', 'rewards', 'reward']
+                            for name in common_names:
+                                try:
+                                    # support nested names using _access_nested_group for slash paths
+                                    if '/' in name:
+                                        dset = _access_nested_group(demo, name)
+                                    else:
+                                        dset = demo[name] if name in demo else None
+                                except Exception:
+                                    dset = None
+                                if dset is not None:
+                                    try:
+                                        arr = np.array(dset, dtype=float)
+                                        if arr.size > 0:
+                                            found_env_rewards = arr.reshape(-1)
+                                            break
+                                    except Exception:
+                                        continue
+                            if found_env_rewards is not None:
+                                break
+
+                            # Fallback: look for any dataset/group with 'reward' in the name
+                            for subkey in demo.keys():
+                                if 'reward' in subkey.lower():
+                                    try:
+                                        sub = demo[subkey]
+                                        if isinstance(sub, h5py.Dataset):
+                                            arr = np.array(sub, dtype=float)
+                                            if arr.size > 0:
+                                                found_env_rewards = arr.reshape(-1)
+                                                break
+                                        elif isinstance(sub, h5py.Group):
+                                            # search inside group
+                                            for sk in sub.keys():
+                                                if 'reward' in sk.lower():
+                                                    inner = sub[sk]
+                                                    if isinstance(inner, h5py.Dataset):
+                                                        arr = np.array(inner, dtype=float)
+                                                        if arr.size > 0:
+                                                            found_env_rewards = arr.reshape(-1)
+                                                            break
+                                            if found_env_rewards is not None:
+                                                break
+                                    except Exception:
+                                        continue
+                            if found_env_rewards is not None:
+                                break
+
+                    if found_env_rewards is not None:
+                        traj_data['env_rewards'] = found_env_rewards
+                        print(f"Loaded env_rewards from H5 for trajectory {traj_id}")
+            except Exception as e:
+                print(f"Warning: Could not load env_rewards from HDF5: {e}")
+
         return traj_data
 
 

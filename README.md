@@ -12,3 +12,8 @@ conda activate inest
 # Install dependencies.
 pip install -r requirements.txt
 ```
+
+
+## Info
+
+Originally forked from [LucaIanniello/INEST-MANISKILL](https://github.com/LucaIanniello/INEST-MANISKILL)

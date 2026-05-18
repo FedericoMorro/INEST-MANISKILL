@@ -2,19 +2,21 @@
 
 import sys
 import os
-
-# Add parent directories to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
+import argparse
 
 import copy
 import gymnasium as gym
 import numpy as np
 from PIL import Image
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
 
 # Import the stack pyramid env to register it
 from inest_irl.maniskill3.stack_pyramid import StackPyramidEnv
 from inest_irl.utils import utils
+
+
+NUM_STEPS = 10
 
 
 def print_structure(obj, indent=0, max_depth=10, max_items=5):
@@ -89,8 +91,11 @@ def print_structure(obj, indent=0, max_depth=10, max_items=5):
 
 
 
-def main():
-    """Create and test StackPyramid environment as it's created in SAC training."""
+def main(render=False):
+    """Create and test StackPyramid environment as it's created in SAC training.
+    Args:
+        render: If True, display rendered frames to the screen.
+    """
     # Create output directory for rendered images
     output_dir = "out/test_env_creation"
     os.makedirs(output_dir, exist_ok=True)
@@ -106,17 +111,11 @@ def main():
         action_repeat=1,
         frame_stack=1,  # Using frame_stack=1 for clearer testing
         add_episode_monitor=False,  # Disabled to see raw gymnasium output
+        base_camera="base_camera",
+        render_camera="base_camera",
+        cameras_resolution=(512, 512),  # Use higher resolution for testing
     )
-    
-    # Unwrap to the base environment and set render mode
-    base_env = env
-    while hasattr(base_env, 'env'):
-        base_env = base_env.env
-    if hasattr(base_env, 'set_render_mode'):
-        base_env.set_render_mode("rgb_array")
-    else:
-        base_env.render_mode = "rgb_array"
-    
+
     print(f"Environment created: obs_space={env.observation_space}, action_space={env.action_space}\n")
     
     # Reset environment to get initial state
@@ -137,72 +136,135 @@ def main():
     else:
         print("None")
     
-    # Render initial state
+    # Save initial sensor images (moved to info) if available, then render initial state
     print(f"\n{'='*80}")
     print("RENDERING TEST:")
     print(f"{'='*80}")
-    
-    img = env.render()
-    if img is not None:
-        if hasattr(img, 'shape'):
-            # Convert torch tensor to numpy and handle batch dimension
+
+    sensor_data = None
+    if isinstance(info, dict) and "sensor_data" in info:
+        sensor_data = info["sensor_data"]
+    elif isinstance(obs, dict) and "sensor_data" in obs:
+        sensor_data = obs["sensor_data"]
+
+    if isinstance(sensor_data, dict):
+        if "base_camera" in sensor_data and isinstance(sensor_data["base_camera"], dict) and "rgb" in sensor_data["base_camera"]:
+            base_img = sensor_data["base_camera"]["rgb"]
+            if hasattr(base_img, 'shape'):
+                base_arr = base_img.cpu().numpy() if hasattr(base_img, 'cpu') else np.array(base_img)
+                if base_arr.ndim == 4 and base_arr.shape[0] == 1:
+                    base_arr = base_arr[0]
+                base_arr = base_arr.astype(np.uint8) if base_arr.dtype != np.uint8 else base_arr
+                Image.fromarray(base_arr).save(os.path.join(output_dir, "initial_base_camera.png"))
+
+        if "hand_camera" in sensor_data and isinstance(sensor_data["hand_camera"], dict) and "rgb" in sensor_data["hand_camera"]:
+            hand_img = sensor_data["hand_camera"]["rgb"]
+            if hasattr(hand_img, 'shape'):
+                hand_arr = hand_img.cpu().numpy() if hasattr(hand_img, 'cpu') else np.array(hand_img)
+                if hand_arr.ndim == 4 and hand_arr.shape[0] == 1:
+                    hand_arr = hand_arr[0]
+                hand_arr = hand_arr.astype(np.uint8) if hand_arr.dtype != np.uint8 else hand_arr
+                Image.fromarray(hand_arr).save(os.path.join(output_dir, "initial_hand_camera.png"))
+
+    # Render initial state: if render flag is set, call env.render() to show on screen; otherwise save rgb_array
+    if render:
+        env.render()
+    else:
+        img = env.render()
+        if img is not None and hasattr(img, 'shape'):
             if hasattr(img, 'cpu'):
                 img = img.cpu().numpy()
             else:
                 img = np.array(img)
-            
-            # Remove batch dimension if present
             if img.ndim == 4 and img.shape[0] == 1:
                 img = img[0]
-            
-            # Save initial frame
             img = img.astype(np.uint8) if img.dtype != np.uint8 else img
             pil_img = Image.fromarray(img)
             output_path = os.path.join(output_dir, "initial.png")
             pil_img.save(output_path)
             print(f"Rendered image: shape={img.shape}, saved to {output_path}")
-    else:
-        print("No render output available")
     
     # Run steps to see environment in action
     print(f"\n{'='*80}")
-    print("RUNNING 100 RANDOM ACTION STEPS:")
+    print(f"RUNNING {NUM_STEPS} RANDOM ACTION STEPS:")
     print(f"{'='*80}\n")
-    for step in range(100):
+    
+    # Create matplotlib figure for real-time visualization
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+    fig.suptitle("Camera Views")
+    axes[0].set_title("Base Camera")
+    axes[1].set_title("Hand Camera")
+    for ax in axes:
+        ax.axis('off')
+    
+    img_base_display = axes[0].imshow(np.zeros((480, 640, 3), dtype=np.uint8))
+    img_hand_display = axes[1].imshow(np.zeros((480, 640, 3), dtype=np.uint8))
+    
+    plt.tight_layout()
+    plt.ion()  # Enable interactive mode
+    
+    for step in range(NUM_STEPS):
         action = env.action_space.sample()
         step_result = env.step(action)
         
-        # Handle different wrapper return formats
+        # Simplified handling of step return formats
         if isinstance(step_result, tuple):
-            if len(step_result) == 5:
-                obs, reward, terminated, truncated, info = step_result
-            elif len(step_result) == 6:
-                obs, reward, terminated, truncated, info, _ = step_result
+            if len(step_result) >= 5:
+                obs, reward, terminated, truncated, info = step_result[:5]
             else:
                 obs = step_result[0]
                 reward = step_result[1] if len(step_result) > 1 else 0.0
                 terminated = step_result[2] if len(step_result) > 2 else False
                 truncated = step_result[3] if len(step_result) > 3 else False
                 info = step_result[4] if len(step_result) > 4 else {}
+        else:
+            obs = step_result
+            reward = 0.0
+            terminated = False
+            truncated = False
+            info = {}
         
-        # Extract camera images if available
+        # Extract camera images if available (sensor_data moved to info)
         base_rgb = None
         hand_rgb = None
-        
-        if isinstance(obs, dict) and "sensor_data" in obs:
+        sensor_data = None
+        if isinstance(info, dict) and "sensor_data" in info:
+            sensor_data = info["sensor_data"]
+        elif isinstance(obs, dict) and "sensor_data" in obs:
             sensor_data = obs["sensor_data"]
-            if isinstance(sensor_data, dict):
-                if "base_camera" in sensor_data and isinstance(sensor_data["base_camera"], dict):
-                    if "rgb" in sensor_data["base_camera"]:
-                        base_rgb = sensor_data["base_camera"]["rgb"]
-                
-                if "hand_camera" in sensor_data and isinstance(sensor_data["hand_camera"], dict):
-                    if "rgb" in sensor_data["hand_camera"]:
-                        hand_rgb = sensor_data["hand_camera"]["rgb"]
+
+        if isinstance(sensor_data, dict):
+            if "base_camera" in sensor_data and isinstance(sensor_data["base_camera"], dict) and "rgb" in sensor_data["base_camera"]:
+                base_rgb = sensor_data["base_camera"]["rgb"]
+            if "hand_camera" in sensor_data and isinstance(sensor_data["hand_camera"], dict) and "rgb" in sensor_data["hand_camera"]:
+                hand_rgb = sensor_data["hand_camera"]["rgb"]
+        
+        # Update matplotlib displays
+        if base_rgb is not None and hasattr(base_rgb, 'shape'):
+            img = base_rgb
+            if hasattr(img, 'cpu'):
+                img = img.cpu().numpy()
+            else:
+                img = np.array(img)
+            img = img.astype(np.uint8) if img.dtype != np.uint8 else img
+            if img.ndim == 4 and img.shape[0] == 1:
+                img = img[0]
+            img_base_display.set_data(img)
+        
+        if hand_rgb is not None and hasattr(hand_rgb, 'shape'):
+            img = hand_rgb
+            if hasattr(img, 'cpu'):
+                img = img.cpu().numpy()
+            else:
+                img = np.array(img)
+            img = img.astype(np.uint8) if img.dtype != np.uint8 else img
+            if img.ndim == 4 and img.shape[0] == 1:
+                img = img[0]
+            img_hand_display.set_data(img)
         
         # Print progress every 25 steps
         if (step + 1) % 25 == 0:
-            print(f"Step {step+1}/100: reward={reward:.4f}")
+            print(f"Step {step+1}/{NUM_STEPS}: reward={reward:.4f}")
         
         # Save camera images at specific steps
         if step in [0, 50, 99] or (step < 10):
@@ -219,6 +281,7 @@ def main():
                 pil_img = Image.fromarray(img)
                 output_path = os.path.join(output_dir, f"step_{step+1}_base_camera.png")
                 pil_img.save(output_path)
+                # Avoid Image.show(); rely on env.render() when render=True
             
             if hand_rgb is not None and hasattr(hand_rgb, 'shape'):
                 img = hand_rgb
@@ -233,99 +296,32 @@ def main():
                 pil_img = Image.fromarray(img)
                 output_path = os.path.join(output_dir, f"step_{step+1}_hand_camera.png")
                 pil_img.save(output_path)
+                # Avoid Image.show(); rely on env.render() when render=True
         
-        img = env.render()
-        if img is not None and hasattr(img, 'shape'):
-            # Convert torch tensor to numpy and handle batch dimension
-            if hasattr(img, 'cpu'):
-                img = img.cpu().numpy()
-            else:
-                img = np.array(img)
-            
-            # Remove batch dimension if present
-            if img.ndim == 4 and img.shape[0] == 1:
-                img = img[0]
-            
-            # Save frame
-            img = img.astype(np.uint8) if img.dtype != np.uint8 else img
-            pil_img = Image.fromarray(img)
-            output_path = os.path.join(output_dir, f"step_{step+1}.png")
-            pil_img.save(output_path)
+        # Update figure display
+        fig.canvas.draw()
+        plt.pause(0.01)  # Small pause to allow figure to update and remain responsive
+        
+        if render:
+            env.render()
         
         if terminated or truncated:
             break
-
-    obs, info = env.reset()
-    init_obs_after_episode = copy.deepcopy(obs)
-
-    print(f"{'='*80}")
-    print("OBSERVATION CONSISTENCY CHECK:")
-    print(f"{'='*80}")
-    
-    def compare_values(v1, v2):
-        """Helper function to compare values that might be tensors or arrays."""
-        if isinstance(v1, np.ndarray) and isinstance(v2, np.ndarray):
-            return np.array_equal(v1, v2)
-        elif hasattr(v1, 'numpy'):
-            # Torch tensor
-            v1_np = v1.cpu().numpy() if hasattr(v1, 'cpu') else v1.numpy()
-            v2_np = v2.cpu().numpy() if hasattr(v2, 'cpu') else v2.numpy()
-            return np.array_equal(v1_np, v2_np)
-        elif isinstance(v1, dict) and isinstance(v2, dict):
-            return all(compare_values(v1.get(k), v2.get(k)) for k in v1.keys() if k in v2)
-        else:
-            try:
-                return v1 == v2
-            except:
-                return False
-    
-    if isinstance(init_obs, dict) and isinstance(init_obs_after_episode, dict):
-        all_match = True
-        mismatches = []
         
-        for key in init_obs.keys():
-            if key in init_obs_after_episode:
-                init_val = init_obs[key]
-                after_val = init_obs_after_episode[key]
-                
-                # Handle nested dicts
-                if isinstance(init_val, dict) and isinstance(after_val, dict):
-                    sub_matches = []
-                    for subkey in init_val.keys():
-                        if subkey in after_val:
-                            match = compare_values(init_val[subkey], after_val[subkey])
-                            sub_matches.append((subkey, match))
-                            if not match:
-                                all_match = False
-                                mismatches.append(f"{key}.{subkey}")
-                        else:
-                            sub_matches.append((subkey, False))
-                            all_match = False
-                            mismatches.append(f"{key}.{subkey} (missing)")
-                    
-                    match_count = sum(1 for _, m in sub_matches if m)
-                    print(f"  {key}: {match_count}/{len(sub_matches)} fields match")
-                else:
-                    match = compare_values(init_val, after_val)
-                    print(f"  {key}: {'✓' if match else '✗'}")
-                    if not match:
-                        all_match = False
-                        mismatches.append(key)
-            else:
-                print(f"  {key}: ✗ (missing in after-episode)")
-                all_match = False
-                mismatches.append(key)
-        
-        print(f"\nResult: {'✓ PASS' if all_match else '✗ FAIL'} - All observations match")
-        if mismatches:
-            print(f"  Mismatches: {', '.join(mismatches[:5])}{'...' if len(mismatches) > 5 else ''}")
+    # wait for user to close the figure if rendering, otherwise just close it
+    if render:
+        print("Episode ended. Close the figure window to finish.")
+        plt.ioff()  # Disable interactive mode
+        plt.show()  # Keep the figure open until user closes it
     else:
-        match = compare_values(init_obs, init_obs_after_episode)
-        print(f"Initial obs == After-episode obs: {'✓ PASS' if match else '✗ FAIL'}")
-    
+        plt.close(fig)  # Close the figure after loop completes
+
     env.close()
     print("\nTest completed!")
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Test environment creation and rendering")
+    parser.add_argument("-r", "--render", action="store_true", help="Display rendered frames to screen")
+    args = parser.parse_args()
+    main(render=args.render)

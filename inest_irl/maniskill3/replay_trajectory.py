@@ -18,11 +18,12 @@ python inest_irl/maniskill3/replay_trajectory.py
     --obs-mode rgb+state_dict
     --output-path ../data/maniskill/StackPyramid-v1_.../
     --use-env-states
+    --record-rewards
     [--count 100]
     [--num-envs 10]
     [--cam-width 256]
     [--cam-height 256]
-    [--render-camera base_camera]
+    [--base-camera base_camera]
 
     
 # to replay trajs with state_dict obses and get environmental rewards for analysis
@@ -140,7 +141,7 @@ class Args:
     output_path: Optional[str] = None
     """The output path to save the replayed trajectory data and videos.
     By default it will save to the same directory"""
-    render_camera: str = "base_camera"
+    base_camera: str = "base_camera"
     """The camera to use for rendering videos and saving frames. By default it will use the base_camera"""
     cam_width: Optional[int] = None
     """Override width for all cameras (Default: 128)."""
@@ -443,7 +444,7 @@ def _main_helper(x):
     return _main(*x)
 
 
-def _make_env(env_id, render_camera, **kwargs):
+def _make_env(env_id, base_camera, **kwargs):
     """Create env, overriding StackPyramid to use local custom implementation."""
     if "StackPyramid-v1" in env_id:
         import stack_pyramid as local_stack_pyramid
@@ -451,7 +452,7 @@ def _make_env(env_id, render_camera, **kwargs):
         return local_stack_pyramid.StackPyramidEnv(
             env_reward_type="normalized_dense",
             enforce_full_episodes=False,
-            render_camera=render_camera,
+            base_camera=base_camera,
             **kwargs
     )
     return gym.make(env_id, **kwargs)
@@ -479,7 +480,7 @@ def _main(
     # Load associated json
     json_path = traj_path.replace(".h5", ".json")
     json_data = io_utils.load_json(json_path)
-    env = _make_env(env_id, args.render_camera, **env_kwargs)
+    env = _make_env(env_id, args.base_camera, **env_kwargs)
     if isinstance(env.action_space, gym.spaces.Dict):
         logger.warning(
             "We currently do not track which wrappers are used when recording trajectories but majority of the time in multi-agent envs with dictionary action spaces the actions are stored as flat vectors. We will flatten the action space with the ManiSkill provided FlattenActionSpaceWrapper. If you do not want this behavior you can copy the replay trajectory code yourself and modify it as needed."

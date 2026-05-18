@@ -27,8 +27,11 @@ from mani_skill.utils.structs.pose import Pose
 
 HORIZON = 100
 DEFAULT_ENV_RANDOMIZATION = "default"
-DEFAULT_RENDER_CAMERA = "base_camera"
 MAX_SUBGOAL = 4
+
+DEFAULT_RENDER_CAMERA = "base_camera"
+DEFAULT_BASE_CAMERA = "base_camera"
+DEFAULT_CAMERAS_RESOLUTION = (128, 128)
 
 N_STEP_DENSE_REWARD = 4
 SUCCESS_REWARD = 2.0
@@ -96,7 +99,9 @@ class StackPyramidEnv(BaseEnv):
         robot_uids="panda_wristcam",
         robot_init_qpos_noise=0.02,
         env_randomization=DEFAULT_ENV_RANDOMIZATION,
+        base_camera=DEFAULT_BASE_CAMERA,
         render_camera=DEFAULT_RENDER_CAMERA,
+        cameras_resolution=DEFAULT_CAMERAS_RESOLUTION,
         enforce_full_episodes=True,
         is_state_based_policy=False,
         **kwargs
@@ -110,7 +115,10 @@ class StackPyramidEnv(BaseEnv):
         self.env_randomization = env_randomization
         self.enforce_full_episodes = enforce_full_episodes
         self.is_state_based_policy = is_state_based_policy
+        
+        self.base_camera = base_camera
         self.render_camera = render_camera
+        self.cameras_resolution = cameras_resolution
         
         kwargs["reward_mode"] = env_reward_type
         self.max_subgoal = MAX_SUBGOAL
@@ -119,23 +127,37 @@ class StackPyramidEnv(BaseEnv):
         self.robot_init_qpos_noise = robot_init_qpos_noise
         super().__init__(*args, robot_uids=robot_uids, **kwargs)
         
+        
+    def _get_base_camera_config(self, name="base_camera"):
+        cam_res_0, cam_res_1 = self.cameras_resolution
+        pose = sapien_utils.look_at(eye=[0.3, 0, 0.1], target=[-0.05, 0, 0.1])
+        return CameraConfig(name, pose, cam_res_0, cam_res_1, np.pi / 2, 0.01, 100)
+    
+    def _get_render_camera_config(self, name="render_camera"):
+        cam_res_0, cam_res_1 = self.cameras_resolution
+        pose = sapien_utils.look_at(eye=[0.6, 0.7, 0.6], target=[0.0, 0.0, 0.35])
+        return CameraConfig(name, pose, cam_res_0, cam_res_1, 1, 0.01, 100)
     
 
     @property
     def _default_sensor_configs(self):
-        pose = sapien_utils.look_at(eye=[0.3, 0, 0.4], target=[-0.05, 0, 0.1])
-        return [CameraConfig("base_camera", pose, 128, 128, np.pi / 2, 0.01, 100)]
+        # pose = sapien_utils.look_at(eye=[0.3, 0, 0.4], target=[-0.05, 0, 0.1])
+        # return CameraConfig("base_camera", pose, 128, 128, np.pi / 2, 0.01, 100)
+        if self.base_camera == "base_camera":
+            return [self._get_base_camera_config()]
+        elif self.base_camera == "render_camera":
+            return [self._get_render_camera_config(name="base_camera")]
+        else:
+            raise ValueError(f"Unsupported base camera: {self.base_camera}")
 
     @property
     def _default_human_render_camera_configs(self):
         #pose = sapien_utils.look_at([0.6, 0.7, 0.6], [0.0, 0.0, 0.35])
         #return CameraConfig("render_camera", pose, 512, 512, 1, 0.01, 100)
         if self.render_camera == "render_camera":
-            pose = sapien_utils.look_at([0.6, 0.7, 0.6], [0.0, 0.0, 0.35])
-            return CameraConfig("render_camera", pose, 128, 128, 1, 0.01, 100)
-        
+            return self._get_render_camera_config()
         elif self.render_camera == "base_camera":
-            return self._default_sensor_configs
+            return self._get_base_camera_config(name="render_camera")
         
         elif self.render_camera == "hand_camera":
             hand_camera_config = None

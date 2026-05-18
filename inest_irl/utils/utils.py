@@ -214,7 +214,9 @@ def make_env(
   frame_stack = 1,
   action_repeat = 1,
   env_randomization = "default",
+  base_camera = "base_camera",
   render_camera = "render_camera",
+  cameras_resolution = (128, 128),
   reward_scaling = 1.0,
   rank = 0,
   train_flag = False,
@@ -262,10 +264,12 @@ def make_env(
     seed=seed,
     obs_mode=obs_mode,
     control_mode="pd_ee_delta_pose", # pd_ee_delta_pos[e], with e includes also gripper quaternion orientation control
+    base_camera=base_camera,
+    render_camera=render_camera,
+    cameras_resolution=cameras_resolution,
     render_mode="rgb_array",
     env_reward_type="normalized_dense",
     env_randomization=env_randomization,
-    render_camera=render_camera,
     enforce_full_episodes=True,
     is_state_based_policy=True if "rgb" in obs_mode else False,
   )

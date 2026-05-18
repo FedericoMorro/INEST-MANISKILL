@@ -75,19 +75,20 @@ python inest_irl/maniskill3/replay_trajectory.py \
     --obs-mode rgb+state_dict \
     --output_path $replay_output_dir \
     --use-env-states \
-    --count $count \
+    --record-rewards \
     --num-envs 10 \
-    --render-camera base_camera \
+    --base-camera base_camera \
     --cam-width 128 \
     --cam-height 128
+    #--count $count \
 
 replay_traj_h5="${replay_output_dir}/trajectory.rgb+state_dict.pd_joint_pos.physx_cpu.h5"
 
 
 # create dataset from replayed trajectories
-if [[ "$create_dataset" == true ]]; then
-    dataset_output_dir="${DATA_BASE_DIR}/inest-maniskill/datasets/dataset-${suffix}"
+dataset_output_dir="${DATA_BASE_DIR}/inest-maniskill/datasets/dataset-${suffix}"
 
+if [[ "$create_dataset" == true ]]; then
     python inest_irl/dataset_utils/h5_to_dataset.py \
         --h5_path ${replay_traj_h5} \
         --dataset_path ${dataset_output_dir} \
