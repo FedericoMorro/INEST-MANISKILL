@@ -34,7 +34,7 @@ from xirl import common
 import wandb
 
 #from configs import validate_config
-from inest_irl.utils.compute_learned_return import compute_avg_reward_metrics
+from inest_irl.utils.learned_reward_utils import compute_avg_reward_metrics
 from inest_irl.utils.loggers import CSVLogger
 from inest_irl.utils.utils import save_config, setup_experiment
 

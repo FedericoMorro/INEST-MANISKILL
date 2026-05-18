@@ -107,7 +107,7 @@ if [[ "$1" == "rl" ]]; then
 elif [[ "$1" == "pretrain" || "$1" == "opt-pretrain" ]]; then
     echo "Submitting INEST MANISKILL pretraining job..."
 
-    DATASET_PATH="/home/fmorro/data/inest-maniskill/dataset-min-rand"
+    DATASET_PATH="/home/fmorro/data/inest-maniskill/dataset-min-rand_vis"
 
     # copy dataset to SCRATCH_FLASH for faster access during training (if already present ask user)
     export TRAIN_DATASET_PATH="${TRAIN_DATA_PARTITION}/$(basename ${DATASET_PATH})"
@@ -119,7 +119,7 @@ elif [[ "$1" == "pretrain" || "$1" == "opt-pretrain" ]]; then
 
         export BATCH_SIZE="8"
         export TRAIN_MAX_ITERS="10_000"
-        export NUM_FRAMES_PER_SEQUENCE="80"
+        export NUM_FRAMES_PER_SEQUENCE="40"
 
         manage_existing_exp_folder "${HOME}/INEST-MANISKILL/experiments/pretrain/${EXPERIMENT_NAME}"
 
