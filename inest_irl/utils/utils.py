@@ -15,17 +15,14 @@
 
 """Useful methods shared by all scripts."""
 
-import inspect
 import json
 import os
 import pickle
-from types import MethodType
 import yaml
 
 from absl import logging
 import gymnasium as gym
 from gymnasium.wrappers import RescaleAction
-import matplotlib.pyplot as plt
 from ml_collections import config_dict
 import numpy as np
 import torch
@@ -33,7 +30,7 @@ from torchkit import CheckpointManager
 from torchkit.experiment import git_revision_hash
 import importlib
 
-from inest_irl.sac import wrappers
+from inest_irl.models import wrappers
 from xirl import common
 
 
