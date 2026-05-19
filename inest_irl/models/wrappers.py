@@ -669,6 +669,29 @@ class SubgoalDistanceRewardWrapper(LearnedVisualRewardWrapper):
         return obs, reward, terminated, truncated, info
     
     
+class GoalDistanceSubgoalsFlatRewardWrapper(GoalDistanceWithSubgoalsRewardWrapper):
+    """Variant of GoalDistanceWithSubgoalsRewardWrapper that uses flat rewards during reaching cubes subgoals step"""
+    
+    def _get_reward_from_image(self, image):
+        """Compute reward based on distance to final goal, with flat 'reaching' subgoals."""
+        image_tensor = self._to_tensor(image)
+        emb = self.model.infer(image_tensor).numpy().embs
+        self._update_detected_subgoal(emb)
+        dist = np.linalg.norm(self.goal_emb - emb)
+        rew = - dist * self.dist_scale  # in [-1, 0]
+        
+        if self.curr_detected_subgoal == 0:     # reach cube A
+            rew = -1.0
+        elif self.curr_detected_subgoal == 1:   # move cube A to cube B
+            rew = 0.25 + rew
+        elif self.curr_detected_subgoal == 2:   # reach cube C
+            rew = 0.0
+        elif self.curr_detected_subgoal == 3:   # move cube C to cube B
+            rew = 1.0 + rew
+        
+        return rew
+    
+    
 
 # TODO: NOT TESTED
 class StateIntrinsicEnvironmentRewardWrapper(RewardWrapper):

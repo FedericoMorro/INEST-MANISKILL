@@ -358,72 +358,19 @@ def wrap_env(env, reward_type, rank, train_flag, exp_dir, learned_reward_data):
   elif reward_type == "subgoal_dist":
     return wrappers.SubgoalDistanceRewardWrapper(
       env=env, rank=rank, train_flag=train_flag, exp_dir=exp_dir,
-      model=model, device=device, #res_hw=model_config.data_augmentation.image_size,  -> should be already 128x128
+      model=model, device=device,
       camera_names=camera_names,
       goal_emb=goal_emb,subgoal_embs=subgoal_embs, dist_scale=dist_scale, subgoal_info=subgoal_info,
     )
+  elif reward_type == "goal_dist_subgoals_flat":
+    return wrappers.GoalDistanceSubgoalsFlatRewardWrapper(
+      env=env, rank=rank, train_flag=train_flag, exp_dir=exp_dir,
+      model=model, device=device,
+      camera_names=camera_names,
+      goal_emb=goal_emb, subgoal_embs=subgoal_embs, dist_scale=dist_scale, subgoal_info=subgoal_info,
+    )
   else:
      raise NotImplementedError(f"Reward wrapper type {reward_type} not implemented yet.")
-  
-  
-  if reward_type == "reds":
-    print("Model loaded")
-    model.load_state_dict(torch.load(
-        os.path.join(pretrained_path, "reds_model.pth"),
-        map_location=device,
-    ))
-    model.to(device).eval()
-
-  kwargs = {
-      "env": env,
-      "model": model,
-      "device": device,
-      "res_hw": model_config.data_augmentation.image_size,
-  }
-  
-
-  if reward_type == "goal_classifier":
-    env = wrappers.GoalClassifierLearnedVisualReward(**kwargs)
-
-  elif reward_type == "distance_to_goal":
-    kwargs["goal_emb"] = load_pickle(pretrained_path, "goal_emb.pkl")
-    kwargs["distance_scale"] = load_pickle(pretrained_path,
-                                           "distance_scale.pkl")
-    env = wrappers.DistanceToGoalLearnedVisualReward(**kwargs)
-    
-  elif reward_type == "inest":
-    all_means = load_pickle(pretrained_path, "subtask_means.pkl")
-    selected_means_2_4_6 = [all_means[i] for i in [1]]  # elements 2,4,6
-    kwargs["subtask_means"] = selected_means_2_4_6
-    kwargs["distance_scale"] = load_pickle(pretrained_path,
-                                           "distance_scale.pkl")
-    env = wrappers.INESTIRLLearnedVisualReward(**kwargs)
-    
-  elif reward_type == "inest_knn":
-    all_means = load_pickle(pretrained_path, "subtask_means.pkl")
-    selected_means_2_4_6 = [all_means[i] for i in [0,1]]  # elements 2,4,6
-    kwargs["subtask_means"] = selected_means_2_4_6
-    kwargs["distance_scale"] = load_pickle(pretrained_path,
-                                           "distance_scale.pkl")
-    env = wrappers.KNNINESTIRLLearnedVisualReward(**kwargs)
-    
-  elif reward_type == "state_intrinsic":
-    all_means = load_pickle(pretrained_path, "subtask_means.pkl")
-    selected_means_2_4_6 = [all_means[i] for i in [0,1]]  # elements 2,4,6
-    kwargs["subtask_means"] = selected_means_2_4_6
-    kwargs["distance_scale"] = load_pickle(pretrained_path,
-                                           "distance_scale.pkl")
-    env = wrappers.STATEINTRINSICLearnedVisualReward(**kwargs)
-    
-  elif reward_type == "reds":
-    print("AAAAAAA")
-    env = wrappers.REDSLearnedVisualReward(**kwargs)
-
-  else:
-    raise ValueError(
-        f"{reward_type} is not a valid reward wrapper.")
-
-  return env
 
 
 def load_learned_reward_data(pretrained_path, device, data_dir=None):
