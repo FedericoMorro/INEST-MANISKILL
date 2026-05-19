@@ -530,7 +530,7 @@ class GoalDistanceRewardWrapper(LearnedVisualRewardWrapper):
 
     self.goal_emb = np.atleast_2d(goal_emb)
     self.dist_scale = dist_scale
-    print(f"Initialized GoalDistanceRewardWrapper with goal_emb shape {self.goal_emb.shape} and distance_scale {dist_scale}")
+    print(f"Initialized {self.__class__.__name__} with goal_emb shape {self.goal_emb.shape} and distance_scale {dist_scale}")
 
   def _get_reward_from_image(self, image):
     """Forward the pixels through the model and compute the reward."""
@@ -564,7 +564,7 @@ class GoalDistanceWithSubgoalsRewardWrapper(LearnedVisualRewardWrapper):
         
         self.curr_detected_subgoal = 0
         
-        print(f"Initialized GoalDistanceWithSubgoalsRewardWrapper with goal_emb shape {self.goal_emb.shape}, "
+        print(f"Initialized {self.__class__.__name__} with goal_emb shape {self.goal_emb.shape}, "
               f"{len(self.subgoal_embs)} subgoal embeddings, distance_scale {dist_scale}, and subgoal_info {subgoal_info}")
         
     def _update_detected_subgoal(self, emb):
@@ -625,7 +625,7 @@ class SubgoalDistanceRewardWrapper(LearnedVisualRewardWrapper):
         
         self.curr_detected_subgoal = 0
         
-        print(f"Initialized SubgoalDistanceRewardWrapper with goal_emb shape {self.goal_emb.shape}, "
+        print(f"Initialized {self.__class__.__name__} with goal_emb shape {self.goal_emb.shape}, "
               f"{len(self.subgoal_embs)} subgoal embeddings, distance_scale {dist_scale}, and subgoal_info {subgoal_info}")
         
     def _update_detected_subgoal(self, emb):
@@ -671,7 +671,7 @@ class SubgoalDistanceRewardWrapper(LearnedVisualRewardWrapper):
     
 class GoalDistanceSubgoalsFlatRewardWrapper(GoalDistanceWithSubgoalsRewardWrapper):
     """Variant of GoalDistanceWithSubgoalsRewardWrapper that uses flat rewards during reaching cubes subgoals step"""
-    
+
     def _get_reward_from_image(self, image):
         """Compute reward based on distance to final goal, with flat 'reaching' subgoals."""
         image_tensor = self._to_tensor(image)
