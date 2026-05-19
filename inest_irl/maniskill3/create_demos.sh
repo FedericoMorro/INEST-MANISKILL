@@ -1,5 +1,11 @@
 #!/bin/bash
 
+# example usage:
+#   ./inest_irl/maniskill3/create_demos.sh minimal min-rand_vis \
+#       --demos-h5 ../.maniskill/demos_min-rand/StackPyramid-v1custom/motionplanning/trajectory.h5 \
+#       --create-dataset
+#       --create-videos base_camera
+
 DATA_BASE_DIR="../data"
 
 if [ "$#" -lt 2 ]; then
@@ -122,7 +128,6 @@ if [ -n "$create_videos" ]; then
             --subgoals ${dataset_output_dir}/subgoal_frames.json
 
         python inest_irl/viz/merge_videos.py \
-            --video_dir ${video_output_dir} \
-            --output_name ${suffix}_${cam}
+            --video_dir ${video_output_dir}
     done
 fi

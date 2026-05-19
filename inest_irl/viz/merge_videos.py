@@ -176,8 +176,8 @@ def merge_videos_batch(video_paths, output_path, grid_size=(4, 4), fps=10):
 if __name__ == "__main__":
     argparser = argparse.ArgumentParser(description="Merge multiple videos into a single video with batched grid layout.")
     argparser.add_argument("--video_dir", type=str, required=True, help="Directory containing input videos.")
-    argparser.add_argument("--output_dir", type=str, default="out/viz_data/", help="Directory to save the merged video.")
-    argparser.add_argument("--output_name", type=str, default="merged_video", help="Filename for the merged video.")
+    argparser.add_argument("--output_dir", type=str, default=None, help="Directory to save the merged video.")
+    argparser.add_argument("--output_name", type=str, default="_merged", help="Filename for the merged video.")
     argparser.add_argument("--grid_dims", type=int, nargs=2, default=(4, 4), help="Grid dimensions (rows cols) for merging videos.")
     argparser.add_argument("--fps", type=int, default=30, help="Frames per second for the output video.")
     args = argparser.parse_args()
@@ -188,5 +188,8 @@ if __name__ == "__main__":
         print(f"No videos found in {args.video_dir}")
     else:
         print(f"Found {len(video_paths)} videos")
-        output_path = os.path.join(args.output_dir, f"{args.output_name}.mp4")
+        if args.output_dir is None:
+            output_path = os.path.join(args.video_dir, f"{args.output_name}.mp4")
+        else:
+            output_path = os.path.join(args.output_dir, f"{args.output_name}.mp4")
         merge_videos_batch(video_paths, output_path, grid_size=tuple(args.grid_dims), fps=args.fps)

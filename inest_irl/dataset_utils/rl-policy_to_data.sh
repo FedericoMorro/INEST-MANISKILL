@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# example usage:
+#   TODO
+
 DATA_BASE_DIR="../data"
 
 if [ "$#" -lt 1 ]; then
@@ -143,13 +146,13 @@ if [ -n "$eval_learned_return_model" ]; then
     print_with_border "EVALUATING LEARNED RETURNS"
 
     if [ -z "$eval_learned_return_data_dir" ]; then
-        python inest_irl/utils/compute_learned_return.py \
+        python scripts/compute_learned_return.py \
             --experiment_path "$eval_learned_return_model" \
             --output_dir "${output_path}/learned_return_evaluation" \
             --diff_trajs_dataset "$eval_learned_return_data_dir" \
             --plot_subgoal_dists
     else
-        python inest_irl/utils/compute_learned_return.py \
+        python scripts/compute_learned_return.py \
             --experiment_path "$eval_learned_return_model" \
             --output_dir "${output_path}/learned_return_evaluation" \
             --diff_trajs_dataset "$eval_learned_return_data_dir" \

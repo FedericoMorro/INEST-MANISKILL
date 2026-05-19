@@ -3,7 +3,7 @@
 """
 Example usage:
 
-python inest_irl/utils/compute_learned_return.py
+python scripts/compute_learned_return.py
     --experiment_path ../data/inest-maniskill/_experiments/pretrain/render-cam/
     [--cache_only]
     [--overwrite]
@@ -12,7 +12,7 @@ python inest_irl/utils/compute_learned_return.py
 
 
 # for different trajs
-python inest_irl/utils/compute_learned_return.py
+python scripts/compute_learned_return.py
     --experiment_path ../data/inest-maniskill/_experiments/pretrain/render-cam/
     --diff_trajs_dataset ../data/inest-maniskill/different-trajs/
     [--data_root ../data/inest-maniskill/datasets/dataset-rc-1000-states]
@@ -34,6 +34,7 @@ from xirl import common
 from xirl.models import SelfSupervisedModel
 
 from inest_irl.maniskill3.stack_pyramid import MAX_SUBGOAL
+from inest_irl.utils.learned_reward_utils import compute_goal_embedding
 from inest_irl.utils.learned_reward_utils import DatasetLearnedReward, TrajectoryLearnedReward
 from inest_irl.utils.utils import load_config_from_dir
 
@@ -119,65 +120,6 @@ def setup_from_pretrain(experiment_path, use_cpu, diff_dataset_path=None, data_r
   valid_loader = common.get_downstream_dataloaders(config, debug=use_cpu)["valid"]
   
   return model, train_loader, valid_loader, train_subgoal_frames, valid_subgoal_frames, global_step, device
-
-
-def compute_goal_embedding(model, train_loader, subgoal_frames, device):
-  """Compute the mean goal embedding from the last frames of trajectories"""
-  init_embs, goal_embs, subgoal_embs_list = [], [], []
-
-  # get init, goal (final), and subgoals embeddings for each trajectory in the training set
-  for class_name, class_loader in train_loader.items():
-    for batch in tqdm(iter(class_loader), leave=True, desc=f"Embedding {class_name}"):
-      out = model.infer(batch["frames"].to(device))   # batch_size=1 since hardcoded in downstream dataloader
-      emb = out.numpy().embs  # shape: (seq_len, embedding_dim)
-      
-      init_embs.append(emb[0, :])   # first frame embedding
-      goal_embs.append(emb[-1, :])  # last frame embedding
-
-      if subgoal_frames is not None:
-        traj_id = batch["video_name"][0].split('/')[-1]  # video name should be in format .../../video_id
-        
-        # skip if trajectory ID not in subgoal_frames (data mismatch)
-        if traj_id not in subgoal_frames:
-          print(f"Warning: Trajectory ID {traj_id} not found in subgoal frames data - skipping subgoal embedding for this trajectory")
-          continue
-        
-        subgoal_idxs = subgoal_frames[traj_id]
-
-        # if empty list, add empty lists inside with the length of the number of subgoals
-        if len(subgoal_embs_list) == 0:
-          for _ in range(MAX_SUBGOAL):
-            subgoal_embs_list.append([])
-
-        # add subgoal embeddings to the corresponding subgoal index list
-        for i, idx in enumerate(subgoal_idxs):
-          if idx >= emb.shape[0]:  # sanity check for subgoal index out of bounds
-            print(f"Warning: Subgoal index {idx} for trajectory {traj_id} is out of bounds (trajectory length {emb.shape[0]}) - skipping this subgoal")
-            continue
-          subgoal_embs_list[i].append(emb[idx, :])  # subgoal frame embedding
-  
-  # compute mean goal embedding and distance scale
-  goal_emb = np.mean(np.stack(goal_embs, axis=0), axis=0, keepdims=True)
-  dist_to_goal = np.linalg.norm(np.stack(init_embs, axis=0) - goal_emb, axis=1).mean()
-  dist_scale = 1.0 / (dist_to_goal + 1e-8)
-
-  # compute mean subgoal embeddings if subgoal frames are provided
-  if subgoal_frames is not None:
-    subgoal_embs = []
-    for traj_subgoal_embs in subgoal_embs_list:
-      subgoal_embs.append(np.mean(np.stack(traj_subgoal_embs, axis=0), axis=0, keepdims=True))
-  else:
-    subgoal_embs = None
-    print("WARNING: No subgoal embeddings computed")
-  
-  # add subgoal info for pickling, used by wrapper in rl training
-  subgoal_info = {
-    "c_value": C_VALUE,
-    "distance_thresholds": DISTANCE_THRESHOLDS,
-    "patience_threshold": PATIENCE_THRESHOLD,
-  }
-  
-  return goal_emb, subgoal_embs, dist_scale, subgoal_info
   
            
 def compute_reward_signals(model, valid_loader, goal_emb, subgoal_embs, dist_scale, device, subgoal_frames=None):
@@ -259,8 +201,11 @@ def main(args):
   torch.backends.cudnn.deterministic = True
   torch.backends.cudnn.benchmark = False
 
-  exp_name = args.experiment_path.strip('/').split('/')[-1]
-  out_dir = os.path.join(args.output_dir, exp_name)
+  if args.output_dir is None:
+    out_dir = os.path.join(args.experiment_path, "learned_reward_analysis")
+  else:
+    exp_name = args.experiment_path.strip('/').split('/')[-1]
+    out_dir = os.path.join(args.output_dir, exp_name)
   os.makedirs(out_dir, exist_ok=True)
 
   # if a different trajectory dataset is provided, create a subfolder for its results inside the experiment output directory
@@ -289,7 +234,10 @@ def main(args):
     print("No cached embedddings found (or overwrite flag is set) - computing from scratch...")
 
     # compute goal embedding
-    goal_emb, subgoal_embs, dist_scale, subgoal_info = compute_goal_embedding(model, train_loader, train_subgoal_frames, device)
+    goal_emb, subgoal_embs, dist_scale, subgoal_info = compute_goal_embedding(
+      model, train_loader, train_subgoal_frames, device,
+      c_value=C_VALUE, distance_thresholds=DISTANCE_THRESHOLDS, patience_threshold=PATIENCE_THRESHOLD,
+    )
     print(f"Goal embedding computed - shape: {goal_emb.shape}")
     if subgoal_embs is not None:
       print(f"Subgoals identified: {len(subgoal_embs)} - shape: {subgoal_embs[0].shape}")
@@ -352,7 +300,7 @@ if __name__ == "__main__":
                           help="Path to the pretraining experiment directory")
   arg_parser.add_argument("--data_root", type=str, default=None,
                           help="Optional override for the trajectory dataset root directory (if not provided, will use the one from the experiment config)")
-  arg_parser.add_argument("--output_dir", type=str, default="/home/fmorro/INEST-MANISKILL/out/reward_plots",
+  arg_parser.add_argument("--output_dir", type=str, default=None,
                           help="Directory to save the generated plots")
   arg_parser.add_argument("--count", type=int, default=-1,
                           help="Maximum number of trajectory-wise plots to save per plot type (-1 plots all trajectories)")

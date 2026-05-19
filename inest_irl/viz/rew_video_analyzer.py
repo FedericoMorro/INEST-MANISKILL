@@ -1,7 +1,7 @@
 """
 Example usage:
 
-# experiments
+# experiments (output of eval_policy.py)
 python inest_irl/viz/rew_video_analyzer.py \
     --h5 ../data/inest-maniskill/_experiments/lr-sb3/min_fr40_d0.95/22/out_eval-policy-py/best_model/trajectories.h5 \
     --rewards ../data/inest-maniskill/_experiments/lr-sb3/min_fr40_d0.95/22/out_eval-policy-py/best_model/learned_rewards.json \
@@ -9,11 +9,11 @@ python inest_irl/viz/rew_video_analyzer.py \
     --only_video \
     --count 2
     
-# dataset
+# dataset (output of compute_learned_return.py)
 python inest_irl/viz/rew_video_analyzer.py \
-    --h5 ../data/maniskill/StackPyramid-v1_data-min-rand/trajectory.rgb+state_dict.pd_joint_pos.physx_cpu.h5 \
-    --rewards out/reward_plots/min_mc_b8_fr40/learned_rewards.json \
-    --video_name min_mc_b8_fr40_data \
+    --h5 ../data/maniskill/StackPyramid-v1_data-min-rand_vis/trajectory.rgb+state_dict.pd_joint_pos.physx_cpu.h5 \
+    --rewards ../data/inest-maniskill/_experiments/pretrain/_BUG/min_mc_b8_fr60_vis/learned_reward_analysis/learned_rewards.json \
+    --video_name min_mc_b8_fr60_data \
     --only_video \
     --count 2
 """
@@ -440,7 +440,8 @@ class RewardPlotter:
         # Setup secondary axis for env rewards
         if env_rewards is not None and len(env_rewards) > 0:
             self.ax2 = self.ax.twinx()
-            self.ax2.plot(timesteps, env_rewards, 'orange', linewidth=2, alpha=0.7, label='Env Reward')
+            timesteps_env = np.arange(len(env_rewards))
+            self.ax2.plot(timesteps_env, env_rewards, 'orange', linewidth=2, alpha=0.7, label='Env Reward')
             self.ax2.set_ylabel('Env Reward', color='orange', labelpad=14)
             self.ax2.tick_params(axis='y', labelcolor='orange', pad=4)
             self.ax2.spines['right'].set_position(('outward', 10))

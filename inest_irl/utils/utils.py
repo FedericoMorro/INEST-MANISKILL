@@ -436,7 +436,7 @@ def load_learned_reward_data(pretrained_path, device, data_dir=None):
       goal_emb, subgoal_embs, dist_scale, subgoal_info = pickle.load(fp)
   else:
     print("No cached (sub)goal embedding(s) found, computing now...")
-    from inest_irl.utils.compute_learned_return import compute_goal_embedding
+    from inest_irl.utils.learned_reward_utils import compute_goal_embedding
     
     if data_dir is not None:
       print(f"Overriding data directory to {data_dir} for computing goal embedding")

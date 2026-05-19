@@ -3,8 +3,9 @@ Example usage:
 
 python scripts/eval_policy.py \
     ../data/inest-maniskill/_experiments/lr-sb3/min_fr40_d0.95/22/checkpoints/best_model.zip \
-    --num_episodes 10 --save_rgb --learned_reward_model_path \
-    ../data/inest-maniskill/_experiments/pretrain/min_mc_b8_fr40/ \
+    --num_episodes 100 \
+    --save_rgb \
+    --learned_reward_model_path ../data/inest-maniskill/_experiments/pretrain/min_mc_b8_fr40/ \
     --learned_reward_data_dir ../data/inest-maniskill/datasets/dataset-min-rand/
 """
 
