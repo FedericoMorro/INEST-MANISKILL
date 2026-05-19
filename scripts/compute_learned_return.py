@@ -34,7 +34,7 @@ from xirl import common
 from xirl.models import SelfSupervisedModel
 
 from inest_irl.maniskill3.stack_pyramid import MAX_SUBGOAL
-from inest_irl.utils.learned_reward_utils import compute_goal_embedding
+from inest_irl.models.learned_reward import compute_goal_embedding
 from inest_irl.utils.learned_reward_utils import DatasetLearnedReward, TrajectoryLearnedReward
 from inest_irl.utils.utils import load_config_from_dir
 
