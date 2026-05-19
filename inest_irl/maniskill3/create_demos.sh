@@ -3,7 +3,7 @@
 DATA_BASE_DIR="../data"
 
 if [ "$#" -lt 2 ]; then
-    echo "Usage: $0 <env_randomization> <suffix> [--count N] [--demos-h5 H5_PATH] [--create-dataset] [--create-videos]"
+    echo "Usage: $0 <env_randomization> <suffix> [--count N] [--demos-h5 H5_PATH] [--create-dataset] [--create-videos <cam0,cam1,...>]"
     exit 1
 fi
 
@@ -13,7 +13,7 @@ suffix="$2"
 count=100
 demos_h5=""
 create_dataset=false
-create_videos=false
+create_videos=""
 
 # parse optional flags
 shift 2
@@ -40,8 +40,12 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --create-videos)
-            create_videos=true
-            shift
+            if [ -z "$2" ]; then
+                echo "Error: --create-videos flag requires a comma-separated list of camera names"
+                exit 1
+            fi
+            create_videos="$2"
+            shift 2
             ;;
         *)
             echo "Unknown flag: $1"
@@ -89,6 +93,11 @@ replay_traj_h5="${replay_output_dir}/trajectory.rgb+state_dict.pd_joint_pos.phys
 dataset_output_dir="${DATA_BASE_DIR}/inest-maniskill/datasets/dataset-${suffix}"
 
 if [[ "$create_dataset" == true ]]; then
+    if [ -d "$dataset_output_dir" ]; then
+        echo "Dataset output directory $dataset_output_dir already exists. Overriding it..."
+        rm -rf "$dataset_output_dir"
+    fi
+
     python inest_irl/dataset_utils/h5_to_dataset.py \
         --h5_path ${replay_traj_h5} \
         --dataset_path ${dataset_output_dir} \
@@ -97,10 +106,23 @@ fi
 
 
 # create videos from replayed trajectories
-if [[ "$create_videos" == true ]]; then
-    python inest_irl/dataset_utils/h5_analyzer.py \
-	    ${replay_traj_h5} \
-	    --vis base_camera \
-	    --output_path ${DATA_BASE_DIR}/inest-maniskill/videos/video-${suffix} \
-	    --subgoals ${dataset_output_dir}/subgoal_frames.json
+if [ -n "$create_videos" ]; then
+    OLD_IFS="$IFS"
+    IFS=','
+    set -- $create_videos
+    IFS="$OLD_IFS"
+
+    for cam in "$@"; do
+        video_output_dir="${DATA_BASE_DIR}/inest-maniskill/videos/video-${suffix}_${cam}"
+
+        python inest_irl/dataset_utils/h5_analyzer.py \
+            ${replay_traj_h5} \
+            --vis ${cam} \
+            --output_path ${video_output_dir} \
+            --subgoals ${dataset_output_dir}/subgoal_frames.json
+
+        python inest_irl/viz/merge_videos.py \
+            --video_dir ${video_output_dir} \
+            --output_name ${suffix}_${cam}
+    done
 fi

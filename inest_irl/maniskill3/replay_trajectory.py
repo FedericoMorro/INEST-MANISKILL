@@ -431,6 +431,10 @@ def replay_cpu_sim(
             else:
                 if args.verbose:
                     print("info", info)
+                    
+                #! otherwise the failed traj will be saved before the successful replay in the next iteration
+                env.flush_trajectory(save=False)
+                env.flush_video(save=False)
         else:
             env.flush_video(save=False)
             tqdm.write(f"Episode {episode_id} is not replayed successfully. Skipping")
